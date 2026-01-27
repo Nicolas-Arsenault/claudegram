@@ -1,0 +1,33 @@
+{
+  "name": "claude-telegram-bridge",
+  "version": "1.0.0",
+  "description": "A bridge connecting Claude Code terminal sessions to Telegram",
+  "main": "dist/index.js",
+  "bin": {
+    "claude-telegram-bridge": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts"
+  },
+  "keywords": [
+    "claude",
+    "telegram",
+    "terminal",
+    "pty",
+    "bridge"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "node-pty": "^1.0.0",
+    "telegraf": "^4.16.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
