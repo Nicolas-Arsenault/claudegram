@@ -30,6 +30,12 @@ import { Config } from '../config';
 // ANSI escape code regex for stripping terminal sequences
 const ANSI_REGEX = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?\x07|\x1b[PX^_].*?\x1b\\|\r/g;
 
+// Maximum buffer size before forcing a flush (100KB)
+const MAX_BUFFER_SIZE = 100 * 1024;
+
+// Output debounce delay in milliseconds
+const OUTPUT_DEBOUNCE_MS = 500;
+
 export class TelegramBot {
   private bot: Telegraf;
   private sessionManager: SessionManager;
@@ -57,7 +63,8 @@ export class TelegramBot {
     // Handle PTY output - buffer and debounce
     this.sessionManager.setOutputCallback((chatId, data) => {
       const existing = this.outputBuffers.get(chatId) || '';
-      this.outputBuffers.set(chatId, existing + data);
+      const newBuffer = existing + data;
+      this.outputBuffers.set(chatId, newBuffer);
 
       // Clear existing timer
       const existingTimer = this.outputTimers.get(chatId);
@@ -65,10 +72,16 @@ export class TelegramBot {
         clearTimeout(existingTimer);
       }
 
-      // Set new timer to flush output after 500ms of no new data
+      // Force flush if buffer exceeds max size to prevent memory issues
+      if (newBuffer.length >= MAX_BUFFER_SIZE) {
+        this.flushOutput(chatId);
+        return;
+      }
+
+      // Set new timer to flush output after debounce delay
       const timer = setTimeout(() => {
         this.flushOutput(chatId);
-      }, 500);
+      }, OUTPUT_DEBOUNCE_MS);
 
       this.outputTimers.set(chatId, timer);
     });
