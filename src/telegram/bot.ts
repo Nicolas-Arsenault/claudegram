@@ -17,7 +17,7 @@
  */
 
 import { Telegraf, Context } from 'telegraf';
-import { Message, Update } from 'telegraf/types';
+import { Message } from 'telegraf/types';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as https from 'https';
