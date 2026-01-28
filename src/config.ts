@@ -10,7 +10,7 @@
  * Optional environment variables:
  * - SCREENSHOT_OUTPUT_DIR: Directory for screenshots (default: ./screenshots)
  * - INPUT_IMAGE_DIR: Directory for received images (default: ./inputs)
- * - SESSION_IDLE_TIMEOUT_MS: Idle timeout in ms (default: 30 minutes)
+ * - SESSION_IDLE_TIMEOUT_MS: Idle timeout in ms (default: 3 hours)
  */
 
 import * as path from 'path';
@@ -57,9 +57,9 @@ export function loadConfig(): Config {
   const screenshotOutputDir = process.env.SCREENSHOT_OUTPUT_DIR || './screenshots';
   const inputImageDir = process.env.INPUT_IMAGE_DIR || './inputs';
 
-  // Default idle timeout: 30 minutes (as per project.md Section 5.4)
+  // Default idle timeout: 3 hours
   const sessionIdleTimeoutMs = parseInt(
-    process.env.SESSION_IDLE_TIMEOUT_MS || '1800000',
+    process.env.SESSION_IDLE_TIMEOUT_MS || '10800000',
     10
   );
 

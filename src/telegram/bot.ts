@@ -174,23 +174,30 @@ export class TelegramBot {
       return next();
     });
 
-    // Handle /start command
+    // Handle /start command - explicitly creates a Claude session
     this.bot.command('start', async (ctx) => {
       const chatId = ctx.chat.id;
+
+      if (this.sessionManager.hasSession(chatId)) {
+        await ctx.reply(
+          'Claude session already active.\n\n' +
+          'Use /kill to terminate and /start again for a fresh session.'
+        );
+        return;
+      }
+
+      // Create new session
+      this.sessionManager.getOrCreateSession(chatId);
       await ctx.reply(
-        'Claudegram\n\n' +
+        'Starting new Claude Code session...\n\n' +
+        'This is a fresh session with no previous context.\n\n' +
         'Commands:\n' +
         '  /screenshot - List available displays\n' +
         '  /screenshot <n> - Capture display n\n' +
-        '  /kill - Terminate current Claude session\n\n' +
+        '  /kill - Terminate current session\n' +
+        '  /status - Check session status\n\n' +
         'All other messages are forwarded to Claude Code.'
       );
-
-      // Start a Claude session if one doesn't exist
-      if (!this.sessionManager.hasSession(chatId)) {
-        this.sessionManager.getOrCreateSession(chatId);
-        await ctx.reply('Starting Claude Code session...');
-      }
     });
 
     // Handle /screenshot command (Bridge command, not forwarded to Claude)
@@ -202,9 +209,28 @@ export class TelegramBot {
     this.bot.command('kill', async (ctx) => {
       const chatId = ctx.chat.id;
       if (this.sessionManager.killSession(chatId)) {
-        await ctx.reply('Claude session terminated.');
+        await ctx.reply(
+          'Claude session terminated.\n\n' +
+          'Use /start to begin a new session (no previous context will be retained).'
+        );
       } else {
         await ctx.reply('No active session to terminate.');
+      }
+    });
+
+    // Handle /status command - check session state
+    this.bot.command('status', async (ctx) => {
+      const chatId = ctx.chat.id;
+      if (this.sessionManager.hasSession(chatId)) {
+        await ctx.reply(
+          'Session active.\n\n' +
+          'Claude Code is running and retains context from this conversation.'
+        );
+      } else {
+        await ctx.reply(
+          'No active session.\n\n' +
+          'Use /start to begin a new Claude Code session.'
+        );
       }
     });
 
@@ -323,12 +349,18 @@ export class TelegramBot {
       const fileUrl = `https://api.telegram.org/file/bot${this.bot.telegram.token}/${file.file_path}`;
       await this.downloadFile(fileUrl, localPath);
 
+      // Check if session exists - require explicit /start
+      if (!this.sessionManager.hasSession(chatId)) {
+        await ctx.reply(
+          'Image saved, but no active Claude session.\n\n' +
+          'Use /start to begin a session, then send the image again.'
+        );
+        return;
+      }
+
       // Notify Claude via PTY as specified in project.md Section 7.2
       const caption = (message as any).caption || 'Please inspect this image.';
       const notification = `User sent an image: ${localPath}\n${caption}`;
-
-      // Ensure session exists
-      this.sessionManager.getOrCreateSession(chatId);
 
       // Send to PTY
       this.sessionManager.write(chatId, notification);
@@ -362,14 +394,21 @@ export class TelegramBot {
   /**
    * Handles text messages - forwards to PTY as specified in project.md Section 6.2.
    * Slash commands are forwarded verbatim (no parsing or interpretation).
+   * Requires an active session - prompts user to /start if no session exists.
    */
   private async handleTextMessage(ctx: Context): Promise<void> {
     const message = ctx.message as Message.TextMessage;
     const chatId = ctx.chat!.id;
     const text = message.text;
 
-    // Ensure session exists
-    this.sessionManager.getOrCreateSession(chatId);
+    // Check if session exists - require explicit /start
+    if (!this.sessionManager.hasSession(chatId)) {
+      await ctx.reply(
+        'No active Claude session.\n\n' +
+        'Use /start to begin a new session.'
+      );
+      return;
+    }
 
     // Forward directly to PTY (both plain text and slash commands)
     // As per spec: "Forward verbatim to PTY (no parsing or interpretation)"

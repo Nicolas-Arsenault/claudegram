@@ -50,7 +50,7 @@ npm run build
 | `ALLOWED_USER_IDS` | Yes | Comma-separated Telegram user IDs |
 | `SCREENSHOT_OUTPUT_DIR` | No | Screenshot directory (default: `./screenshots`) |
 | `INPUT_IMAGE_DIR` | No | Image directory (default: `./inputs`) |
-| `SESSION_IDLE_TIMEOUT_MS` | No | Idle timeout in ms (default: 1800000) |
+| `SESSION_IDLE_TIMEOUT_MS` | No | Idle timeout in ms (default: 10800000 / 3 hours) |
 
 ### Example
 
@@ -66,12 +66,13 @@ npm start
 
 | Command | Description |
 |---------|-------------|
-| `/start` | Initialize and start a Claude session |
+| `/start` | Start a new Claude session (required before sending messages) |
+| `/status` | Check if a session is active |
 | `/screenshot` | List available displays |
 | `/screenshot <n>` | Capture display n |
 | `/kill` | Terminate current session |
 
-All other messages are forwarded directly to Claude Code.
+All other messages are forwarded directly to Claude Code (requires active session).
 
 ### Image Handling
 
@@ -82,9 +83,12 @@ All other messages are forwarded directly to Claude Code.
 
 ## Session Model
 
-- One Telegram chat = One Claude Code session
-- Sessions timeout after 30 minutes of inactivity
-- Use `/kill` to manually terminate
+- **Explicit start** — Use `/start` to create a session (no auto-creation)
+- **Persistent context** — Claude retains full context within a session
+- **One session per chat** — Each Telegram chat has its own Claude instance
+- **3-hour timeout** — Sessions end after 3 hours of inactivity (configurable)
+- **Manual termination** — Use `/kill` to end a session early
+- **No context carryover** — New sessions start fresh with no previous context
 
 ## Security
 

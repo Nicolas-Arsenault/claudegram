@@ -109,11 +109,12 @@ Telegram image
 
 ## Session Lifecycle
 
-1. **Creation**: Session created on first message from a chat
-2. **Active**: Messages forwarded to PTY, output sent back
-3. **Idle Timeout**: Session killed after 30 min inactivity (configurable)
+1. **Creation**: Session created explicitly via `/start` command (not auto-created)
+2. **Active**: Messages forwarded to PTY, output sent back, context retained
+3. **Idle Timeout**: Session killed after 3 hours inactivity (configurable)
 4. **Manual Kill**: User sends `/kill` command
 5. **Process Exit**: Claude Code exits naturally
+6. **New Session**: User must `/start` again; no previous context is retained
 
 ## Error Handling
 
