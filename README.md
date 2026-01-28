@@ -102,7 +102,7 @@ This will open a browser for OAuth login with Anthropic. Once authenticated, Cla
 |----------|----------|-------------|
 | `TELEGRAM_BOT_TOKEN` | Yes | Telegram bot API token |
 | `ALLOWED_USER_IDS` | Yes | Comma-separated Telegram user IDs |
-| `SYSTEM_PROMPT_FILE` | No | Path to custom system prompt file (default: `./CLAUDE_PROMPT.md`) |
+| `SYSTEM_PROMPT_FILE` | No | Path to custom system prompt file (default: `CLAUDE_PROMPT.md` in package root) |
 | `SCREENSHOT_OUTPUT_DIR` | No | Screenshot directory (default: `./screenshots`) |
 | `INPUT_IMAGE_DIR` | No | Image directory (default: `./inputs`) |
 | `SESSION_IDLE_TIMEOUT_MS` | No | Idle timeout in ms (default: 10800000 / 3 hours) |
@@ -170,14 +170,14 @@ Output includes stdout, stderr, and exit code. Long outputs are automatically sp
 
 ### System Prompt
 
-Claudegram includes a default security prompt (`CLAUDE_PROMPT.md`) that instructs Claude to:
+Claudegram includes a default security prompt (`CLAUDE_PROMPT.md` in the package root) that instructs Claude to:
 
 - Ask for confirmation before destructive operations
 - Explain what actions it plans to take
 - Request approval before modifying or deleting files
 - Warn about potentially dangerous commands
 
-You can customize this by editing `CLAUDE_PROMPT.md` or setting `SYSTEM_PROMPT_FILE` to a different file.
+The default prompt is automatically loaded regardless of which directory you start the bot from. You can customize this by editing `CLAUDE_PROMPT.md` or setting `SYSTEM_PROMPT_FILE` to an absolute path to a different file.
 
 ## Session Model
 

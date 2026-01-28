@@ -64,14 +64,17 @@ export function loadConfig(): Config {
     10
   );
 
-  // System prompt file - defaults to CLAUDE_PROMPT.md if it exists
-  const defaultPromptFile = './CLAUDE_PROMPT.md';
-  let systemPromptFile: string | null = process.env.SYSTEM_PROMPT_FILE || defaultPromptFile;
+  // System prompt file - defaults to CLAUDE_PROMPT.md in the package root
+  // Use __dirname to resolve relative to the package, not cwd
+  const packageRoot = path.resolve(__dirname, '..');
+  const defaultPromptFile = path.join(packageRoot, 'CLAUDE_PROMPT.md');
+  let systemPromptFile: string | null = process.env.SYSTEM_PROMPT_FILE
+    ? path.resolve(process.env.SYSTEM_PROMPT_FILE)
+    : defaultPromptFile;
 
   // Check if the file exists, set to null if not
   try {
-    require('fs').accessSync(path.resolve(systemPromptFile), require('fs').constants.R_OK);
-    systemPromptFile = path.resolve(systemPromptFile);
+    require('fs').accessSync(systemPromptFile, require('fs').constants.R_OK);
   } catch {
     if (process.env.SYSTEM_PROMPT_FILE) {
       // User explicitly set a file that doesn't exist - warn but continue
