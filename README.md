@@ -1,19 +1,20 @@
 # Claudegram
 
-Control Claude Code from Telegram with full terminal fidelity.
+Control Claude Code from Telegram with full computer access.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
 ## Overview
 
-Claudegram bridges your Claude Code terminal session to Telegram, letting you interact with Claude from anywhere. Telegram acts as a remote keyboard, terminal output viewer, and image sender/receiver.
+Claudegram bridges Claude Code to Telegram, letting you interact with Claude from anywhere. Claude has full computer access via `--dangerously-skip-permissions`, enabling file operations, bash commands, and more.
 
 ## Features
 
-- **Full PTY Terminal** — Real pseudo-terminal connection to Claude Code
-- **Native Commands** — All Claude slash commands forwarded verbatim
+- **Full Computer Access** — Claude can read/write files, execute commands, etc.
+- **Clean SDK Interface** — No terminal parsing issues, reliable output
 - **Image Input** — Send images from Telegram to Claude Code
 - **Screenshots** — Capture and receive screenshots from the host machine
+- **Direct Shell Access** — Execute commands directly via `/cmd`
 - **Secure Access** — Telegram user ID whitelist
 
 ## Architecture
@@ -22,8 +23,10 @@ Claudegram bridges your Claude Code terminal session to Telegram, letting you in
 Telegram Client
     ↕ (Telegram Bot API)
 Claudegram
-    ↕ (PTY)
-Claude Code CLI
+    ↕ (Claude Code SDK/CLI)
+Claude Code
+    ↕ (--dangerously-skip-permissions)
+Your Computer
 ```
 
 ## Requirements
@@ -102,8 +105,21 @@ npm start
 | `/screenshot` | List available displays |
 | `/screenshot <n>` | Capture display n |
 | `/kill` | Terminate current session |
+| `/cmd <command>` | Execute shell command directly (bypasses Claude) |
 
 All other messages are forwarded directly to Claude Code (requires active session).
+
+### Direct Shell Execution
+
+The `/cmd` command executes shell commands directly on the host machine without going through Claude:
+
+```
+/cmd ls -la
+/cmd git status
+/cmd npm test
+```
+
+Output includes stdout, stderr, and exit code. Long outputs are automatically split across multiple messages. Commands run in the bot's working directory with no timeout.
 
 ### Image Handling
 
@@ -131,12 +147,12 @@ All other messages are forwarded directly to Claude Code (requires active sessio
 
 ```
 src/
-├── index.ts           # Entry point
-├── config.ts          # Configuration
-├── pty/session.ts     # PTY management
-├── telegram/bot.ts    # Telegram handler
-├── screenshot/capture.ts  # Screenshot (macOS)
-└── security/access.ts # Access control
+├── index.ts              # Entry point
+├── config.ts             # Configuration
+├── sdk/client.ts         # Claude Code SDK client
+├── telegram/bot.ts       # Telegram handler
+├── screenshot/capture.ts # Screenshot (macOS)
+└── security/access.ts    # Access control
 ```
 
 ## License

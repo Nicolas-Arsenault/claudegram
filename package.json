@@ -1,7 +1,7 @@
 {
   "name": "claudegram",
-  "version": "1.0.0",
-  "description": "Control Claude Code from Telegram - Full PTY terminal bridge",
+  "version": "2.0.0",
+  "description": "Control Claude Code from Telegram with full computer access",
   "main": "dist/index.js",
   "bin": {
     "claudegram": "./dist/index.js"
@@ -9,14 +9,12 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts",
-    "postinstall": "chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null || true"
+    "dev": "ts-node src/index.ts"
   },
   "keywords": [
     "claude",
     "telegram",
-    "terminal",
-    "pty",
+    "sdk",
     "bridge",
     "claudegram"
   ],
@@ -31,7 +29,6 @@
   "author": "Nicolas Arsenault",
   "license": "MIT",
   "dependencies": {
-    "node-pty": "^1.1.0",
     "telegraf": "^4.16.3"
   },
   "devDependencies": {

@@ -1,19 +1,8 @@
 /**
  * Telegram Bot Handler
  *
- * Implements the Telegram bot interface as specified in project.md Section 6.
- *
- * Supported inputs (Section 6.1):
- * - Plain text messages
- * - Slash commands
- * - Images (photo or document)
- *
- * Input handling rules (Section 6.2):
- * - Text message: Forward directly to PTY
- * - Slash command: Forward verbatim to PTY (no parsing or interpretation)
- * - Image: Download locally, save to filesystem, notify Claude Code via PTY with file path
- *
- * The bot must not interpret or reimplement Claude functionality.
+ * Implements the Telegram bot interface using the Claude Code SDK
+ * for clean, reliable communication without terminal parsing issues.
  */
 
 import { Telegraf, Context } from 'telegraf';
@@ -21,83 +10,23 @@ import { Message } from 'telegraf/types';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as https from 'https';
+import { exec } from 'child_process';
 
-import { SessionManager } from '../pty/session';
+import { ClaudeClient } from '../sdk/client';
 import { ScreenshotCapture } from '../screenshot/capture';
 import { AccessControl } from '../security/access';
 import { Config } from '../config';
 
-/**
- * Strips ANSI escape codes, terminal control sequences, and UI elements from text.
- * Returns only the actual content Claude outputs.
- */
-function stripTerminalOutput(text: string, lastInput?: string): string {
-  let result = text
-    // CSI sequences: ESC [ ... (includes DEC private modes with ? < > =)
-    .replace(/\x1b\[[?<>=]?[0-9;]*[a-zA-Z]/g, '')
-    // OSC sequences: ESC ] ... BEL or ESC ] ... ESC \
-    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
-    // DCS, PM, APC sequences: ESC P/^/_ ... ESC \
-    .replace(/\x1b[P^_].*?\x1b\\/g, '')
-    // Single character escapes
-    .replace(/\x1b[()][AB012]/g, '')
-    .replace(/\x1b[78DEHMNOPVWXYZ\\^_`|~]/g, '')
-    // SS2/SS3 sequences
-    .replace(/\x1b[NO]./g, '')
-    // Remove carriage returns
-    .replace(/\r/g, '')
-    // Remove remaining ESC characters
-    .replace(/\x1b/g, '')
-    // Remove all box-drawing and block characters
-    .replace(/[─│┌┐└┘├┤┬┴┼━┃┏┓┗┛┣┫┳┻╋▀▄█▌▐░▒▓■□▪▫●○◘◙◦▗▖▘▝▚▞]/g, '')
-    // Remove Claude UI elements
-    .replace(/^.*ctrl\+[a-z].*$/gim, '')
-    .replace(/^.*Press.*to.*$/gim, '')
-    .replace(/^.*for shortcuts.*$/gim, '')
-    .replace(/^\s*[?❯›>]\s*(for shortcuts)?$/gm, '')
-    // Remove "Try" suggestions
-    .replace(/^.*Try ".*$/gm, '')
-    // Remove spinner/progress characters
-    .replace(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/g, '')
-    // Collapse multiple spaces
-    .replace(/[ \t]+/g, ' ')
-    // Collapse multiple newlines
-    .replace(/\n{3,}/g, '\n\n')
-    // Remove lines that are only whitespace
-    .replace(/^\s+$/gm, '');
-
-  // Remove echoed input if provided
-  if (lastInput) {
-    // The input might appear at the start, possibly with prompt characters
-    const escapedInput = lastInput.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    result = result
-      .replace(new RegExp(`^\\s*[>❯›]?\\s*${escapedInput}\\s*$`, 'gm'), '')
-      .replace(new RegExp(`^${escapedInput}\\s*$`, 'gm'), '');
-  }
-
-  return result.trim();
-}
-
-// Maximum buffer size before forcing a flush (100KB)
-const MAX_BUFFER_SIZE = 100 * 1024;
-
-// Output debounce delay in milliseconds
-// Higher value = more complete messages but slower response
-const OUTPUT_DEBOUNCE_MS = 1000;
-
 export class TelegramBot {
   private bot: Telegraf;
-  private sessionManager: SessionManager;
+  private claudeClient: ClaudeClient;
   private screenshotCapture: ScreenshotCapture;
   private accessControl: AccessControl;
   private inputImageDir: string;
-  private outputBuffers: Map<number, string> = new Map();
-  private outputTimers: Map<number, NodeJS.Timeout> = new Map();
-  private lastInputs: Map<number, string> = new Map();
 
   constructor(config: Config) {
     this.bot = new Telegraf(config.telegramBotToken);
-    this.sessionManager = new SessionManager(config.sessionIdleTimeoutMs);
+    this.claudeClient = new ClaudeClient(config.sessionIdleTimeoutMs);
     this.screenshotCapture = new ScreenshotCapture(config.screenshotOutputDir);
     this.accessControl = new AccessControl(config.allowedUserIds);
     this.inputImageDir = config.inputImageDir;
@@ -107,76 +36,38 @@ export class TelegramBot {
   }
 
   /**
-   * Sets up callbacks for PTY session output and termination.
+   * Sets up callbacks for session termination.
    */
   private setupSessionCallbacks(): void {
-    // Handle PTY output - buffer and debounce
-    this.sessionManager.setOutputCallback((chatId, data) => {
-      const existing = this.outputBuffers.get(chatId) || '';
-      const newBuffer = existing + data;
-      this.outputBuffers.set(chatId, newBuffer);
-
-      // Clear existing timer
-      const existingTimer = this.outputTimers.get(chatId);
-      if (existingTimer) {
-        clearTimeout(existingTimer);
-      }
-
-      // Force flush if buffer exceeds max size to prevent memory issues
-      if (newBuffer.length >= MAX_BUFFER_SIZE) {
-        this.flushOutput(chatId);
-        return;
-      }
-
-      // Set new timer to flush output after debounce delay
-      const timer = setTimeout(() => {
-        this.flushOutput(chatId);
-      }, OUTPUT_DEBOUNCE_MS);
-
-      this.outputTimers.set(chatId, timer);
-    });
-
-    // Handle session termination
-    this.sessionManager.setSessionEndCallback((chatId, reason) => {
-      this.flushOutput(chatId);
+    this.claudeClient.setSessionEndCallback((chatId, reason) => {
       this.sendMessage(chatId, `Session ended: ${reason}`);
     });
   }
 
   /**
-   * Flushes buffered output to Telegram.
-   */
-  private async flushOutput(chatId: number): Promise<void> {
-    const buffer = this.outputBuffers.get(chatId);
-    if (!buffer) return;
-
-    this.outputBuffers.delete(chatId);
-    this.outputTimers.delete(chatId);
-
-    // Strip terminal output and remove echoed input
-    const lastInput = this.lastInputs.get(chatId);
-    const cleanOutput = stripTerminalOutput(buffer, lastInput);
-
-    if (cleanOutput.trim()) {
-      await this.sendMessage(chatId, cleanOutput);
-    }
-  }
-
-  /**
    * Sends a message to a Telegram chat, handling message length limits.
+   * Attempts to parse as Markdown, falls back to plain text if it fails.
    */
   private async sendMessage(chatId: number, text: string): Promise<void> {
     const MAX_MESSAGE_LENGTH = 4096;
 
+    const sendChunk = async (chunk: string) => {
+      try {
+        // Try sending with Markdown parsing
+        await this.bot.telegram.sendMessage(chatId, chunk, { parse_mode: 'Markdown' });
+      } catch {
+        // Fall back to plain text if Markdown parsing fails
+        await this.bot.telegram.sendMessage(chatId, chunk);
+      }
+    };
+
     try {
-      // Split long messages
       if (text.length <= MAX_MESSAGE_LENGTH) {
-        await this.bot.telegram.sendMessage(chatId, text);
+        await sendChunk(text);
       } else {
-        // Split into chunks at line boundaries when possible
         const chunks = this.splitMessage(text, MAX_MESSAGE_LENGTH);
         for (const chunk of chunks) {
-          await this.bot.telegram.sendMessage(chatId, chunk);
+          await sendChunk(chunk);
         }
       }
     } catch (error) {
@@ -197,10 +88,8 @@ export class TelegramBot {
         break;
       }
 
-      // Try to find a good split point (newline)
       let splitIndex = remaining.lastIndexOf('\n', maxLength);
       if (splitIndex === -1 || splitIndex < maxLength / 2) {
-        // No good newline, split at max length
         splitIndex = maxLength;
       }
 
@@ -220,16 +109,16 @@ export class TelegramBot {
       const userId = ctx.from?.id;
       if (!userId || !this.accessControl.isAuthorized(userId)) {
         console.log(`Unauthorized access attempt from user ${userId}`);
-        return; // Silently ignore unauthorized users
+        return;
       }
       return next();
     });
 
-    // Handle /start command - explicitly creates a Claude session
+    // Handle /start command
     this.bot.command('start', async (ctx) => {
       const chatId = ctx.chat.id;
 
-      if (this.sessionManager.hasSession(chatId)) {
+      if (this.claudeClient.hasSession(chatId)) {
         await ctx.reply(
           'Claude session already active.\n\n' +
           'Use /kill to terminate and /start again for a fresh session.'
@@ -237,8 +126,7 @@ export class TelegramBot {
         return;
       }
 
-      // Create new session
-      this.sessionManager.getOrCreateSession(chatId);
+      this.claudeClient.createSession(chatId);
       await ctx.reply(
         'Starting new Claude Code session...\n\n' +
         'This is a fresh session with no previous context.\n\n' +
@@ -246,36 +134,37 @@ export class TelegramBot {
         '  /screenshot - List available displays\n' +
         '  /screenshot <n> - Capture display n\n' +
         '  /kill - Terminate current session\n' +
-        '  /status - Check session status\n\n' +
-        'All other messages are forwarded to Claude Code.'
+        '  /status - Check session status\n' +
+        '  /cmd <command> - Execute shell command directly\n\n' +
+        'All other messages are sent to Claude Code.'
       );
     });
 
-    // Handle /screenshot command (Bridge command, not forwarded to Claude)
+    // Handle /screenshot command
     this.bot.command('screenshot', async (ctx) => {
       await this.handleScreenshot(ctx);
     });
 
-    // Handle /kill command (Bridge command, not forwarded to Claude)
+    // Handle /kill command
     this.bot.command('kill', async (ctx) => {
       const chatId = ctx.chat.id;
-      if (this.sessionManager.killSession(chatId)) {
+      if (this.claudeClient.killSession(chatId)) {
         await ctx.reply(
           'Claude session terminated.\n\n' +
-          'Use /start to begin a new session (no previous context will be retained).'
+          'Use /start to begin a new session.'
         );
       } else {
         await ctx.reply('No active session to terminate.');
       }
     });
 
-    // Handle /status command - check session state
+    // Handle /status command
     this.bot.command('status', async (ctx) => {
       const chatId = ctx.chat.id;
-      if (this.sessionManager.hasSession(chatId)) {
+      if (this.claudeClient.hasSession(chatId)) {
         await ctx.reply(
           'Session active.\n\n' +
-          'Claude Code is running and retains context from this conversation.'
+          'Claude Code is ready to receive messages.'
         );
       } else {
         await ctx.reply(
@@ -283,6 +172,40 @@ export class TelegramBot {
           'Use /start to begin a new Claude Code session.'
         );
       }
+    });
+
+    // Handle /cmd command - execute shell commands directly
+    this.bot.command('cmd', async (ctx) => {
+      const message = ctx.message as Message.TextMessage;
+      const text = message.text;
+      const chatId = ctx.chat.id;
+
+      const cmdMatch = text.match(/^\/cmd\s+(.+)$/s);
+      if (!cmdMatch) {
+        await ctx.reply('Usage: /cmd <command>\n\nExample: /cmd ls -la');
+        return;
+      }
+
+      const command = cmdMatch[1];
+      await ctx.reply(`Executing: ${command}`);
+
+      exec(command, { maxBuffer: 10 * 1024 * 1024 }, async (error, stdout, stderr) => {
+        const parts: string[] = [];
+
+        if (stdout) {
+          parts.push(`stdout:\n${stdout}`);
+        }
+
+        if (stderr) {
+          parts.push(`stderr:\n${stderr}`);
+        }
+
+        const exitCode = error ? error.code ?? 1 : 0;
+        parts.push(`Exit code: ${exitCode}`);
+
+        const output = parts.join('\n\n');
+        await this.sendMessage(chatId, output || 'Command completed with no output.');
+      });
     });
 
     // Handle photos
@@ -296,31 +219,27 @@ export class TelegramBot {
       if (doc.mime_type?.startsWith('image/')) {
         await this.handleImage(ctx, 'document');
       } else {
-        // Forward non-image documents as file path mentions
         await ctx.reply('Only image documents are supported.');
       }
     });
 
-    // Handle all other text messages - forward to PTY
+    // Handle all other text messages
     this.bot.on('text', async (ctx) => {
       await this.handleTextMessage(ctx);
     });
   }
 
   /**
-   * Handles /screenshot command as specified in project.md Section 9.
+   * Handles /screenshot command.
    */
   private async handleScreenshot(ctx: Context): Promise<void> {
     const message = ctx.message as Message.TextMessage;
     const text = message.text;
-    const chatId = ctx.chat!.id;
 
-    // Parse command arguments
     const parts = text.split(/\s+/);
     const indexArg = parts[1];
 
     if (!indexArg) {
-      // List available displays
       try {
         const displays = await this.screenshotCapture.listDisplays();
         const formatted = this.screenshotCapture.formatDisplayList(displays);
@@ -330,7 +249,6 @@ export class TelegramBot {
         await ctx.reply(`Failed to list displays: ${errMsg}`);
       }
     } else {
-      // Capture specific display
       const displayIndex = parseInt(indexArg, 10);
       if (isNaN(displayIndex) || displayIndex < 1) {
         await ctx.reply('Invalid display index. Use a positive integer.');
@@ -354,7 +272,7 @@ export class TelegramBot {
   }
 
   /**
-   * Handles image messages as specified in project.md Section 7.
+   * Handles image messages.
    */
   private async handleImage(
     ctx: Context,
@@ -367,13 +285,11 @@ export class TelegramBot {
     let extension = 'png';
 
     if (type === 'photo') {
-      // Get the highest resolution photo
       const photos = (message as Message.PhotoMessage).photo;
       fileId = photos[photos.length - 1].file_id;
     } else {
       const doc = (message as Message.DocumentMessage).document;
       fileId = doc.file_id;
-      // Try to get extension from filename or mime type
       if (doc.file_name) {
         const ext = path.extname(doc.file_name).slice(1);
         if (ext) extension = ext;
@@ -381,27 +297,22 @@ export class TelegramBot {
     }
 
     try {
-      // Ensure input directory exists
       await fs.mkdir(this.inputImageDir, { recursive: true });
 
-      // Get file info from Telegram
       const file = await ctx.telegram.getFile(fileId);
       if (!file.file_path) {
         await ctx.reply('Failed to get file path from Telegram.');
         return;
       }
 
-      // Generate local filename
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const filename = `image-${timestamp}.${extension}`;
       const localPath = path.join(this.inputImageDir, filename);
 
-      // Download the file
       const fileUrl = `https://api.telegram.org/file/bot${this.bot.telegram.token}/${file.file_path}`;
       await this.downloadFile(fileUrl, localPath);
 
-      // Check if session exists - require explicit /start
-      if (!this.sessionManager.hasSession(chatId)) {
+      if (!this.claudeClient.hasSession(chatId)) {
         await ctx.reply(
           'Image saved, but no active Claude session.\n\n' +
           'Use /start to begin a session, then send the image again.'
@@ -409,14 +320,16 @@ export class TelegramBot {
         return;
       }
 
-      // Notify Claude via PTY as specified in project.md Section 7.2
-      const caption = (message as any).caption || 'Please inspect this image.';
-      const notification = `User sent an image: ${localPath}\n${caption}`;
+      const caption = (message as any).caption || undefined;
+      await ctx.reply('Image saved. Sending to Claude...');
 
-      // Send to PTY
-      this.sessionManager.write(chatId, notification);
+      const response = await this.claudeClient.sendImage(chatId, localPath, caption);
 
-      await ctx.reply(`Image saved. Notifying Claude...`);
+      if (response.success) {
+        await this.sendMessage(chatId, response.output);
+      } else {
+        await ctx.reply(`Error: ${response.error || 'Unknown error'}`);
+      }
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
       await ctx.reply(`Failed to process image: ${errMsg}`);
@@ -443,17 +356,14 @@ export class TelegramBot {
   }
 
   /**
-   * Handles text messages - forwards to PTY as specified in project.md Section 6.2.
-   * Slash commands are forwarded verbatim (no parsing or interpretation).
-   * Requires an active session - prompts user to /start if no session exists.
+   * Handles text messages - sends to Claude via SDK.
    */
   private async handleTextMessage(ctx: Context): Promise<void> {
     const message = ctx.message as Message.TextMessage;
     const chatId = ctx.chat!.id;
     const text = message.text;
 
-    // Check if session exists - require explicit /start
-    if (!this.sessionManager.hasSession(chatId)) {
+    if (!this.claudeClient.hasSession(chatId)) {
       await ctx.reply(
         'No active Claude session.\n\n' +
         'Use /start to begin a new session.'
@@ -461,11 +371,24 @@ export class TelegramBot {
       return;
     }
 
-    // Store last input to filter echo from output
-    this.lastInputs.set(chatId, text);
+    // Show typing indicator
+    await ctx.sendChatAction('typing');
 
-    // Forward directly to PTY
-    this.sessionManager.write(chatId, text);
+    const response = await this.claudeClient.sendMessage(chatId, text);
+
+    if (response.success) {
+      if (response.output) {
+        await this.sendMessage(chatId, response.output);
+      } else {
+        await ctx.reply('Claude completed the task with no text output.');
+      }
+    } else {
+      const errorMsg = response.error || 'Unknown error occurred';
+      await ctx.reply(`Error: ${errorMsg}`);
+      if (response.output) {
+        await this.sendMessage(chatId, response.output);
+      }
+    }
   }
 
   /**
@@ -482,7 +405,7 @@ export class TelegramBot {
    */
   async stop(): Promise<void> {
     console.log('Stopping Telegram bot...');
-    this.sessionManager.shutdown();
+    this.claudeClient.shutdown();
     this.bot.stop('SIGTERM');
     console.log('Telegram bot stopped.');
   }
