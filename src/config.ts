@@ -55,8 +55,15 @@ export function loadConfig(): Config {
     throw new Error('ALLOWED_USER_IDS must contain at least one user ID');
   }
 
-  const screenshotOutputDir = process.env.SCREENSHOT_OUTPUT_DIR || './screenshots';
-  const inputImageDir = process.env.INPUT_IMAGE_DIR || './inputs';
+  // Use __dirname to resolve relative to the package, not cwd
+  const packageRoot = path.resolve(__dirname, '..');
+
+  const screenshotOutputDir = process.env.SCREENSHOT_OUTPUT_DIR
+    ? path.resolve(process.env.SCREENSHOT_OUTPUT_DIR)
+    : path.join(packageRoot, 'screenshots');
+  const inputImageDir = process.env.INPUT_IMAGE_DIR
+    ? path.resolve(process.env.INPUT_IMAGE_DIR)
+    : path.join(packageRoot, 'inputs');
 
   // Default idle timeout: 3 hours
   const sessionIdleTimeoutMs = parseInt(
@@ -65,8 +72,6 @@ export function loadConfig(): Config {
   );
 
   // System prompt file - defaults to CLAUDE_PROMPT.md in the package root
-  // Use __dirname to resolve relative to the package, not cwd
-  const packageRoot = path.resolve(__dirname, '..');
   const defaultPromptFile = path.join(packageRoot, 'CLAUDE_PROMPT.md');
   let systemPromptFile: string | null = process.env.SYSTEM_PROMPT_FILE
     ? path.resolve(process.env.SYSTEM_PROMPT_FILE)
@@ -86,8 +91,8 @@ export function loadConfig(): Config {
   return {
     telegramBotToken,
     allowedUserIds,
-    screenshotOutputDir: path.resolve(screenshotOutputDir),
-    inputImageDir: path.resolve(inputImageDir),
+    screenshotOutputDir,
+    inputImageDir,
     sessionIdleTimeoutMs,
     systemPromptFile,
   };
