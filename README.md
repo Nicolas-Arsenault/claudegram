@@ -28,10 +28,11 @@ Claude Code CLI
 
 ## Requirements
 
-- macOS or Unix-based system
+- macOS (screenshot feature is macOS-only)
 - Node.js >= 18.0.0
-- Claude Code CLI (`brew install claude`)
+- Claude Code CLI installed
 - Telegram Bot Token (via @BotFather)
+- **Screen Recording permission** for screenshots (System Settings > Privacy & Security > Screen Recording)
 
 ## Installation
 

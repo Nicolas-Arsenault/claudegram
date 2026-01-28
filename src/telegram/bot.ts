@@ -27,14 +27,40 @@ import { ScreenshotCapture } from '../screenshot/capture';
 import { AccessControl } from '../security/access';
 import { Config } from '../config';
 
-// ANSI escape code regex for stripping terminal sequences
-const ANSI_REGEX = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?\x07|\x1b[PX^_].*?\x1b\\|\r/g;
+/**
+ * Strips ANSI escape codes and terminal control sequences from text.
+ * Handles CSI sequences, OSC sequences, DEC private modes, and more.
+ */
+function stripAnsi(text: string): string {
+  return text
+    // CSI sequences: ESC [ ... (includes DEC private modes with ? < > =)
+    .replace(/\x1b\[[?<>=]?[0-9;]*[a-zA-Z]/g, '')
+    // OSC sequences: ESC ] ... BEL or ESC ] ... ESC \
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+    // DCS, PM, APC sequences: ESC P/^/_ ... ESC \
+    .replace(/\x1b[P^_].*?\x1b\\/g, '')
+    // Single character escapes: ESC followed by single char
+    .replace(/\x1b[()][AB012]/g, '')
+    .replace(/\x1b[78DEHMNOPVWXYZ\\^_`|~]/g, '')
+    // SS2/SS3 sequences
+    .replace(/\x1b[NO]./g, '')
+    // Remove carriage returns
+    .replace(/\r/g, '')
+    // Remove remaining standalone ESC characters
+    .replace(/\x1b/g, '')
+    // Collapse multiple blank lines into max 2
+    .replace(/\n{3,}/g, '\n\n')
+    // Remove lines that are only whitespace/box-drawing chars
+    .replace(/^[\s─│┌┐└┘├┤┬┴┼━┃┏┓┗┛┣┫┳┻╋▀▄█▌▐░▒▓■□▪▫●○◘◙◦]+$/gm, '')
+    .trim();
+}
 
 // Maximum buffer size before forcing a flush (100KB)
 const MAX_BUFFER_SIZE = 100 * 1024;
 
 // Output debounce delay in milliseconds
-const OUTPUT_DEBOUNCE_MS = 500;
+// Higher value = more complete messages but slower response
+const OUTPUT_DEBOUNCE_MS = 1000;
 
 export class TelegramBot {
   private bot: Telegraf;
@@ -104,7 +130,7 @@ export class TelegramBot {
     this.outputTimers.delete(chatId);
 
     // Strip ANSI escape sequences for cleaner Telegram output
-    const cleanOutput = buffer.replace(ANSI_REGEX, '');
+    const cleanOutput = stripAnsi(buffer);
 
     if (cleanOutput.trim()) {
       await this.sendMessage(chatId, cleanOutput);
