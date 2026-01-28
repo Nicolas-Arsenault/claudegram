@@ -68,24 +68,36 @@ export class SessionManager {
     const workingDir = options.workingDir || process.cwd();
     const homeDir = os.homedir();
 
-    // Ensure PATH includes common locations for claude binary
-    const additionalPaths = [
-      `${homeDir}/.local/bin`,
-      '/usr/local/bin',
-      '/opt/homebrew/bin',
+    // Try to find claude binary in common locations
+    const claudePaths = [
+      `${homeDir}/.local/bin/claude`,
+      '/usr/local/bin/claude',
+      '/opt/homebrew/bin/claude',
+      'claude', // fallback to PATH
     ];
-    const currentPath = process.env.PATH || '';
-    const enhancedPath = [...additionalPaths, currentPath].join(':');
+
+    let claudePath = 'claude';
+    for (const p of claudePaths) {
+      try {
+        require('fs').accessSync(p, require('fs').constants.X_OK);
+        claudePath = p;
+        break;
+      } catch {
+        // Continue to next path
+      }
+    }
+
+    console.log(`Spawning Claude from: ${claudePath}`);
 
     // Spawn Claude Code in a PTY
-    const ptyProcess = pty.spawn('claude', [], {
+    const ptyProcess = pty.spawn(claudePath, [], {
       name: 'xterm-256color',
       cols: 120,
       rows: 40,
       cwd: workingDir,
       env: {
         ...process.env,
-        PATH: enhancedPath,
+        HOME: homeDir,
         TERM: 'xterm-256color',
         COLORTERM: 'truecolor',
       },
