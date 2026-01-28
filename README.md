@@ -8,6 +8,14 @@ Control Claude Code from Telegram with full computer access.
 
 Claudegram bridges Claude Code to Telegram, letting you interact with Claude from anywhere. Claude has full computer access via `--dangerously-skip-permissions`, enabling file operations, bash commands, and more.
 
+## Screenshots
+
+### Real-time Progress Updates
+![Progress Updates](docs/images/progress-updates.png)
+
+### Screenshot Capture
+![Screenshot Feature](docs/images/screenshot-feature.png)
+
 ## Features
 
 - **Full Computer Access** — Claude can read/write files, execute commands, etc.
