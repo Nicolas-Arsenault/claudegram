@@ -12,7 +12,7 @@ import * as path from 'path';
 import * as https from 'https';
 import { exec } from 'child_process';
 
-import { ClaudeClient } from '../sdk/client';
+import { ClaudeClient, ProgressEvent } from '../sdk/client';
 import { ScreenshotCapture } from '../screenshot/capture';
 import { AccessControl } from '../security/access';
 import { Config } from '../config';
@@ -36,12 +36,32 @@ export class TelegramBot {
   }
 
   /**
-   * Sets up callbacks for session termination.
+   * Sets up callbacks for session termination and progress updates.
    */
   private setupSessionCallbacks(): void {
     this.claudeClient.setSessionEndCallback((chatId, reason) => {
       this.sendMessage(chatId, `Session ended: ${reason}`);
     });
+
+    this.claudeClient.setProgressCallback((chatId, event) => {
+      this.sendProgressUpdate(chatId, event);
+    });
+  }
+
+  /**
+   * Sends a progress update to the user.
+   * Uses a simple format to indicate Claude is working.
+   */
+  private async sendProgressUpdate(chatId: number, event: ProgressEvent): Promise<void> {
+    const icon = event.type === 'tool_use' ? '🔧' :
+                 event.type === 'thinking' ? '💭' :
+                 '⏳';
+
+    try {
+      await this.bot.telegram.sendMessage(chatId, `${icon} ${event.message}`);
+    } catch (error) {
+      console.error(`Failed to send progress update to ${chatId}:`, error);
+    }
   }
 
   /**
