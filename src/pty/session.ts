@@ -89,8 +89,8 @@ export class SessionManager {
 
     console.log(`Spawning Claude from: ${claudePath}`);
 
-    // Spawn Claude Code in a PTY
-    const ptyProcess = pty.spawn(claudePath, [], {
+    // Spawn Claude Code in a PTY with --dangerously-skip-permissions
+    const ptyProcess = pty.spawn(claudePath, ['--dangerously-skip-permissions'], {
       name: 'xterm-256color',
       cols: 120,
       rows: 40,

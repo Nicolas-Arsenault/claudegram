@@ -28,31 +28,54 @@ import { AccessControl } from '../security/access';
 import { Config } from '../config';
 
 /**
- * Strips ANSI escape codes and terminal control sequences from text.
- * Handles CSI sequences, OSC sequences, DEC private modes, and more.
+ * Strips ANSI escape codes, terminal control sequences, and UI elements from text.
+ * Returns only the actual content Claude outputs.
  */
-function stripAnsi(text: string): string {
-  return text
+function stripTerminalOutput(text: string, lastInput?: string): string {
+  let result = text
     // CSI sequences: ESC [ ... (includes DEC private modes with ? < > =)
     .replace(/\x1b\[[?<>=]?[0-9;]*[a-zA-Z]/g, '')
     // OSC sequences: ESC ] ... BEL or ESC ] ... ESC \
     .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
     // DCS, PM, APC sequences: ESC P/^/_ ... ESC \
     .replace(/\x1b[P^_].*?\x1b\\/g, '')
-    // Single character escapes: ESC followed by single char
+    // Single character escapes
     .replace(/\x1b[()][AB012]/g, '')
     .replace(/\x1b[78DEHMNOPVWXYZ\\^_`|~]/g, '')
     // SS2/SS3 sequences
     .replace(/\x1b[NO]./g, '')
     // Remove carriage returns
     .replace(/\r/g, '')
-    // Remove remaining standalone ESC characters
+    // Remove remaining ESC characters
     .replace(/\x1b/g, '')
-    // Collapse multiple blank lines into max 2
+    // Remove all box-drawing and block characters
+    .replace(/[─│┌┐└┘├┤┬┴┼━┃┏┓┗┛┣┫┳┻╋▀▄█▌▐░▒▓■□▪▫●○◘◙◦▗▖▘▝▚▞]/g, '')
+    // Remove Claude UI elements
+    .replace(/^.*ctrl\+[a-z].*$/gim, '')
+    .replace(/^.*Press.*to.*$/gim, '')
+    .replace(/^.*for shortcuts.*$/gim, '')
+    .replace(/^\s*[?❯›>]\s*(for shortcuts)?$/gm, '')
+    // Remove "Try" suggestions
+    .replace(/^.*Try ".*$/gm, '')
+    // Remove spinner/progress characters
+    .replace(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/g, '')
+    // Collapse multiple spaces
+    .replace(/[ \t]+/g, ' ')
+    // Collapse multiple newlines
     .replace(/\n{3,}/g, '\n\n')
-    // Remove lines that are only whitespace/box-drawing chars
-    .replace(/^[\s─│┌┐└┘├┤┬┴┼━┃┏┓┗┛┣┫┳┻╋▀▄█▌▐░▒▓■□▪▫●○◘◙◦]+$/gm, '')
-    .trim();
+    // Remove lines that are only whitespace
+    .replace(/^\s+$/gm, '');
+
+  // Remove echoed input if provided
+  if (lastInput) {
+    // The input might appear at the start, possibly with prompt characters
+    const escapedInput = lastInput.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    result = result
+      .replace(new RegExp(`^\\s*[>❯›]?\\s*${escapedInput}\\s*$`, 'gm'), '')
+      .replace(new RegExp(`^${escapedInput}\\s*$`, 'gm'), '');
+  }
+
+  return result.trim();
 }
 
 // Maximum buffer size before forcing a flush (100KB)
@@ -70,6 +93,7 @@ export class TelegramBot {
   private inputImageDir: string;
   private outputBuffers: Map<number, string> = new Map();
   private outputTimers: Map<number, NodeJS.Timeout> = new Map();
+  private lastInputs: Map<number, string> = new Map();
 
   constructor(config: Config) {
     this.bot = new Telegraf(config.telegramBotToken);
@@ -129,8 +153,9 @@ export class TelegramBot {
     this.outputBuffers.delete(chatId);
     this.outputTimers.delete(chatId);
 
-    // Strip ANSI escape sequences for cleaner Telegram output
-    const cleanOutput = stripAnsi(buffer);
+    // Strip terminal output and remove echoed input
+    const lastInput = this.lastInputs.get(chatId);
+    const cleanOutput = stripTerminalOutput(buffer, lastInput);
 
     if (cleanOutput.trim()) {
       await this.sendMessage(chatId, cleanOutput);
@@ -436,8 +461,10 @@ export class TelegramBot {
       return;
     }
 
-    // Forward directly to PTY (both plain text and slash commands)
-    // As per spec: "Forward verbatim to PTY (no parsing or interpretation)"
+    // Store last input to filter echo from output
+    this.lastInputs.set(chatId, text);
+
+    // Forward directly to PTY
     this.sessionManager.write(chatId, text);
   }
 
