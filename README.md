@@ -42,6 +42,36 @@ npm install
 npm run build
 ```
 
+## Setup
+
+### Creating a Telegram Bot
+
+1. Open Telegram and search for `@BotFather`
+2. Start a chat and send `/newbot`
+3. Choose a display name for your bot (e.g., "My Claudegram")
+4. Choose a username ending in `bot` (e.g., `my_claudegram_bot`)
+5. BotFather will reply with your **bot token** — save this securely
+
+```
+Done! Congratulations on your new bot. You will find it at t.me/my_claudegram_bot.
+Use this token to access the HTTP API:
+123456789:ABCdefGHIjklMNOpqrsTUVwxyz
+```
+
+### Getting Your Telegram User ID
+
+Your user ID is required for the whitelist. To find it:
+
+1. Search for `@userinfobot` on Telegram
+2. Start a chat and send any message
+3. The bot replies with your user ID
+
+```
+Your user ID: 123456789
+```
+
+Alternatively, forward a message from yourself to `@userinfobot`.
+
 ## Configuration
 
 | Variable | Required | Description |
