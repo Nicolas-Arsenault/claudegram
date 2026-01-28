@@ -21,6 +21,7 @@ export interface Config {
   screenshotOutputDir: string;
   inputImageDir: string;
   sessionIdleTimeoutMs: number;
+  systemPromptFile: string | null;
 }
 
 /**
@@ -63,11 +64,28 @@ export function loadConfig(): Config {
     10
   );
 
+  // System prompt file - defaults to CLAUDE_PROMPT.md if it exists
+  const defaultPromptFile = './CLAUDE_PROMPT.md';
+  let systemPromptFile: string | null = process.env.SYSTEM_PROMPT_FILE || defaultPromptFile;
+
+  // Check if the file exists, set to null if not
+  try {
+    require('fs').accessSync(path.resolve(systemPromptFile), require('fs').constants.R_OK);
+    systemPromptFile = path.resolve(systemPromptFile);
+  } catch {
+    if (process.env.SYSTEM_PROMPT_FILE) {
+      // User explicitly set a file that doesn't exist - warn but continue
+      console.warn(`Warning: SYSTEM_PROMPT_FILE '${systemPromptFile}' not found, running without system prompt`);
+    }
+    systemPromptFile = null;
+  }
+
   return {
     telegramBotToken,
     allowedUserIds,
     screenshotOutputDir: path.resolve(screenshotOutputDir),
     inputImageDir: path.resolve(inputImageDir),
     sessionIdleTimeoutMs,
+    systemPromptFile,
   };
 }

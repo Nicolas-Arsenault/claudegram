@@ -183,13 +183,18 @@ export class ClaudeClient {
   private onProgress: ProgressCallback | null = null;
   private claudePath: string;
   private workingDir: string;
+  private systemPromptFile: string | null;
 
-  constructor(idleTimeoutMs: number = 1800000, workingDir?: string) {
+  constructor(idleTimeoutMs: number = 1800000, workingDir?: string, systemPromptFile?: string | null) {
     this.idleTimeoutMs = idleTimeoutMs;
     this.claudePath = findClaudeBinary();
     this.workingDir = workingDir || process.cwd();
+    this.systemPromptFile = systemPromptFile || null;
     this.startIdleCheck();
     console.log(`Claude SDK client initialized, using: ${this.claudePath}`);
+    if (this.systemPromptFile) {
+      console.log(`Using system prompt from: ${this.systemPromptFile}`);
+    }
   }
 
   /**
@@ -248,6 +253,11 @@ export class ClaudeClient {
       '--output-format', 'stream-json',
       '--verbose',
     ];
+
+    // Add system prompt if configured
+    if (this.systemPromptFile) {
+      args.push('--system-prompt', this.systemPromptFile);
+    }
 
     // Use --resume to continue conversation if we've already started
     if (session.conversationStarted) {

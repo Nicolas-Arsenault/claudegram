@@ -26,7 +26,11 @@ export class TelegramBot {
 
   constructor(config: Config) {
     this.bot = new Telegraf(config.telegramBotToken);
-    this.claudeClient = new ClaudeClient(config.sessionIdleTimeoutMs);
+    this.claudeClient = new ClaudeClient(
+      config.sessionIdleTimeoutMs,
+      process.cwd(),
+      config.systemPromptFile
+    );
     this.screenshotCapture = new ScreenshotCapture(config.screenshotOutputDir);
     this.accessControl = new AccessControl(config.allowedUserIds);
     this.inputImageDir = config.inputImageDir;

@@ -11,7 +11,9 @@ Claudegram bridges Claude Code to Telegram, letting you interact with Claude fro
 ## Features
 
 - **Full Computer Access** — Claude can read/write files, execute commands, etc.
-- **Clean SDK Interface** — No terminal parsing issues, reliable output
+- **Real-time Progress** — See what Claude is doing (reading files, running commands, etc.)
+- **Streaming Updates** — Tool usage displayed as it happens, with 30s fallback messages
+- **Security Prompts** — Configurable system prompt to require confirmation before actions
 - **Image Input** — Send images from Telegram to Claude Code
 - **Screenshots** — Capture and receive screenshots from the host machine
 - **Direct Shell Access** — Execute commands directly via `/cmd`
@@ -23,7 +25,7 @@ Claudegram bridges Claude Code to Telegram, letting you interact with Claude fro
 Telegram Client
     ↕ (Telegram Bot API)
 Claudegram
-    ↕ (Claude Code SDK/CLI)
+    ↕ (Claude Code SDK/CLI with stream-json)
 Claude Code
     ↕ (--dangerously-skip-permissions)
 Your Computer
@@ -33,7 +35,7 @@ Your Computer
 
 - macOS (screenshot feature is macOS-only)
 - Node.js >= 18.0.0
-- Claude Code CLI installed
+- Claude Code CLI installed and authenticated
 - Telegram Bot Token (via @BotFather)
 - **Screen Recording permission** for screenshots (System Settings > Privacy & Security > Screen Recording)
 
@@ -76,12 +78,23 @@ Your user ID: 123456789
 
 Alternatively, forward a message from yourself to `@userinfobot`.
 
+### Authenticating Claude Code
+
+Before running Claudegram, ensure Claude Code is authenticated:
+
+```bash
+claude
+```
+
+This will open a browser for OAuth login with Anthropic. Once authenticated, Claudegram will use those stored credentials.
+
 ## Configuration
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `TELEGRAM_BOT_TOKEN` | Yes | Telegram bot API token |
 | `ALLOWED_USER_IDS` | Yes | Comma-separated Telegram user IDs |
+| `SYSTEM_PROMPT_FILE` | No | Path to custom system prompt file (default: `./CLAUDE_PROMPT.md`) |
 | `SCREENSHOT_OUTPUT_DIR` | No | Screenshot directory (default: `./screenshots`) |
 | `INPUT_IMAGE_DIR` | No | Image directory (default: `./inputs`) |
 | `SESSION_IDLE_TIMEOUT_MS` | No | Idle timeout in ms (default: 10800000 / 3 hours) |
@@ -107,7 +120,18 @@ npm start
 | `/kill` | Terminate current session |
 | `/cmd <command>` | Execute shell command directly (bypasses Claude) |
 
-All other messages are forwarded directly to Claude Code (requires active session).
+All other messages are sent to Claude Code (requires active session).
+
+### Progress Updates
+
+While Claude works, you'll see real-time updates:
+
+- `🔧 Reading: src/index.ts` — File being read
+- `🔧 Writing: src/config.ts` — File being written
+- `🔧 Running: npm test` — Command being executed
+- `🔧 Searching for: "pattern"` — Content search
+- `💭 Thinking...` — Claude is reasoning
+- `⏳ Still working...` — Fallback every 30s if no other activity
 
 ### Direct Shell Execution
 
@@ -119,7 +143,7 @@ The `/cmd` command executes shell commands directly on the host machine without 
 /cmd npm test
 ```
 
-Output includes stdout, stderr, and exit code. Long outputs are automatically split across multiple messages. Commands run in the bot's working directory with no timeout.
+Output includes stdout, stderr, and exit code. Long outputs are automatically split across multiple messages.
 
 ### Image Handling
 
@@ -128,20 +152,33 @@ Output includes stdout, stderr, and exit code. Long outputs are automatically sp
 3. Claude is notified with the file path
 4. Add a caption for context
 
-## Session Model
-
-- **Explicit start** — Use `/start` to create a session (no auto-creation)
-- **Persistent context** — Claude retains full context within a session
-- **One session per chat** — Each Telegram chat has its own Claude instance
-- **3-hour timeout** — Sessions end after 3 hours of inactivity (configurable)
-- **Manual termination** — Use `/kill` to end a session early
-- **No context carryover** — New sessions start fresh with no previous context
-
 ## Security
+
+### Access Control
 
 - Only whitelisted Telegram user IDs can interact
 - Messages from unauthorized users are silently ignored
 - No inbound network ports exposed
+
+### System Prompt
+
+Claudegram includes a default security prompt (`CLAUDE_PROMPT.md`) that instructs Claude to:
+
+- Ask for confirmation before destructive operations
+- Explain what actions it plans to take
+- Request approval before modifying or deleting files
+- Warn about potentially dangerous commands
+
+You can customize this by editing `CLAUDE_PROMPT.md` or setting `SYSTEM_PROMPT_FILE` to a different file.
+
+## Session Model
+
+- **Explicit start** — Use `/start` to create a session (no auto-creation)
+- **Persistent context** — Claude retains full context within a session via `--resume`
+- **One session per chat** — Each Telegram chat has its own Claude instance
+- **3-hour timeout** — Sessions end after 3 hours of inactivity (configurable)
+- **Manual termination** — Use `/kill` to end a session early
+- **Clean process management** — `/kill` terminates any running Claude process
 
 ## Project Structure
 
@@ -149,8 +186,8 @@ Output includes stdout, stderr, and exit code. Long outputs are automatically sp
 src/
 ├── index.ts              # Entry point
 ├── config.ts             # Configuration
-├── sdk/client.ts         # Claude Code SDK client
-├── telegram/bot.ts       # Telegram handler
+├── sdk/client.ts         # Claude Code SDK client with streaming
+├── telegram/bot.ts       # Telegram handler with progress updates
 ├── screenshot/capture.ts # Screenshot (macOS)
 └── security/access.ts    # Access control
 ```
