@@ -17,12 +17,16 @@ import { ScreenshotCapture } from '../screenshot/capture';
 import { AccessControl } from '../security/access';
 import { Config } from '../config';
 
+// Minimum interval between progress updates per chat (10 seconds)
+const PROGRESS_THROTTLE_MS = 10000;
+
 export class TelegramBot {
   private bot: Telegraf;
   private claudeClient: ClaudeClient;
   private screenshotCapture: ScreenshotCapture;
   private accessControl: AccessControl;
   private inputImageDir: string;
+  private lastProgressUpdate: Map<number, number> = new Map();
 
   constructor(config: Config) {
     this.bot = new Telegraf(config.telegramBotToken);
@@ -54,9 +58,19 @@ export class TelegramBot {
 
   /**
    * Sends a progress update to the user.
-   * Uses a simple format to indicate Claude is working.
+   * Throttled to avoid spamming - only sends if enough time has passed since last update.
    */
   private async sendProgressUpdate(chatId: number, event: ProgressEvent): Promise<void> {
+    const now = Date.now();
+    const lastUpdate = this.lastProgressUpdate.get(chatId) || 0;
+
+    // Throttle updates to avoid spam (except for "still working" which are already time-gated)
+    if (event.type !== 'working' && now - lastUpdate < PROGRESS_THROTTLE_MS) {
+      return;
+    }
+
+    this.lastProgressUpdate.set(chatId, now);
+
     const icon = event.type === 'tool_use' ? '🔧' :
                  event.type === 'thinking' ? '💭' :
                  '⏳';
@@ -345,15 +359,23 @@ export class TelegramBot {
       }
 
       const caption = (message as any).caption || undefined;
-      await ctx.reply('Image saved. Sending to Claude...');
+      await ctx.reply('🖼️ Image saved. Processing...');
 
-      const response = await this.claudeClient.sendImage(chatId, localPath, caption);
+      // Process in background to avoid Telegraf timeout
+      this.claudeClient.sendImage(chatId, localPath, caption)
+        .then(async (response) => {
+          if (response.success) {
+            await this.sendMessage(chatId, response.output);
+          } else {
+            await this.sendMessage(chatId, `❌ Error: ${response.error || 'Unknown error'}`);
+          }
+        })
+        .catch((error) => {
+          const errMsg = error instanceof Error ? error.message : String(error);
+          this.sendMessage(chatId, `❌ Error processing image: ${errMsg}`);
+        });
 
-      if (response.success) {
-        await this.sendMessage(chatId, response.output);
-      } else {
-        await ctx.reply(`Error: ${response.error || 'Unknown error'}`);
-      }
+      return; // Return immediately, processing continues in background
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
       await ctx.reply(`Failed to process image: ${errMsg}`);
@@ -366,6 +388,13 @@ export class TelegramBot {
   private downloadFile(url: string, localPath: string): Promise<void> {
     return new Promise((resolve, reject) => {
       const file = require('fs').createWriteStream(localPath);
+
+      file.on('error', (err: Error) => {
+        file.destroy();
+        require('fs').unlink(localPath, () => {});
+        reject(err);
+      });
+
       https.get(url, (response) => {
         response.pipe(file);
         file.on('finish', () => {
@@ -373,6 +402,7 @@ export class TelegramBot {
           resolve();
         });
       }).on('error', (err) => {
+        file.destroy();
         require('fs').unlink(localPath, () => {});
         reject(err);
       });
@@ -381,6 +411,7 @@ export class TelegramBot {
 
   /**
    * Handles text messages - sends to Claude via SDK.
+   * Processing is done in the background to avoid Telegraf's 90s handler timeout.
    */
   private async handleTextMessage(ctx: Context): Promise<void> {
     const message = ctx.message as Message.TextMessage;
@@ -395,20 +426,32 @@ export class TelegramBot {
       return;
     }
 
-    // Show typing indicator
-    await ctx.sendChatAction('typing');
+    // Acknowledge immediately to avoid Telegraf timeout
+    await ctx.reply('🚀 Working on it...');
 
+    // Process in background - don't await, let Telegraf return immediately
+    this.processClaudeMessage(chatId, text).catch((error) => {
+      console.error(`Background processing error for chat ${chatId}:`, error);
+      this.sendMessage(chatId, `Error: ${error.message || 'Unknown error'}`);
+    });
+  }
+
+  /**
+   * Processes a Claude message in the background.
+   * This allows long-running tasks without blocking Telegraf's update handler.
+   */
+  private async processClaudeMessage(chatId: number, text: string): Promise<void> {
     const response = await this.claudeClient.sendMessage(chatId, text);
 
     if (response.success) {
       if (response.output) {
         await this.sendMessage(chatId, response.output);
       } else {
-        await ctx.reply('Claude completed the task with no text output.');
+        await this.sendMessage(chatId, '✅ Task completed with no text output.');
       }
     } else {
       const errorMsg = response.error || 'Unknown error occurred';
-      await ctx.reply(`Error: ${errorMsg}`);
+      await this.sendMessage(chatId, `❌ Error: ${errorMsg}`);
       if (response.output) {
         await this.sendMessage(chatId, response.output);
       }

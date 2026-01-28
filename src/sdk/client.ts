@@ -32,8 +32,8 @@ export interface ProgressEvent {
 type SessionEndCallback = (chatId: number, reason: string) => void;
 type ProgressCallback = (chatId: number, event: ProgressEvent) => void;
 
-// Interval for "still working" fallback messages (30 seconds)
-const STILL_WORKING_INTERVAL_MS = 30000;
+// Interval for "still working" fallback messages (45 seconds)
+const STILL_WORKING_INTERVAL_MS = 45000;
 
 /**
  * Finds the Claude CLI binary path.
@@ -290,6 +290,9 @@ export class ClaudeClient {
       let outputText = '';
       let stderr = '';
       let stillWorkingTimer: NodeJS.Timeout | null = null;
+      let lastActivity = '';
+      let workingMinutes = 0;
+      const startTime = Date.now();
 
       const proc = spawn(this.claudePath, args, {
         cwd: this.workingDir,
@@ -305,16 +308,19 @@ export class ClaudeClient {
         session.activeProcess = proc;
       }
 
-      // Set up "still working" fallback timer
+      // Set up "still working" fallback timer with elapsed time context
       const resetStillWorkingTimer = () => {
         if (stillWorkingTimer) {
           clearInterval(stillWorkingTimer);
         }
         stillWorkingTimer = setInterval(() => {
           if (this.onProgress) {
+            workingMinutes = Math.floor((Date.now() - startTime) / 60000);
+            const timeStr = workingMinutes > 0 ? ` (${workingMinutes}m elapsed)` : '';
+            const activityStr = lastActivity ? ` Last: ${lastActivity}` : '';
             this.onProgress(chatId, {
               type: 'working',
-              message: 'Still working...',
+              message: `Still working...${timeStr}${activityStr}`,
             });
           }
         }, STILL_WORKING_INTERVAL_MS);
@@ -344,6 +350,8 @@ export class ClaudeClient {
             resetStillWorkingTimer();
             // Don't send 'result' events as progress - that's the final state
             if (event.type !== 'result') {
+              // Track last activity for "still working" messages
+              lastActivity = event.message;
               this.onProgress(chatId, event);
             }
           }
@@ -377,6 +385,11 @@ export class ClaudeClient {
           clearInterval(stillWorkingTimer);
         }
 
+        // Clean up listeners to prevent memory leaks
+        proc.stdout?.removeAllListeners();
+        proc.stderr?.removeAllListeners();
+        proc.removeAllListeners();
+
         // Clear active process reference
         if (session) {
           session.activeProcess = undefined;
@@ -400,6 +413,12 @@ export class ClaudeClient {
         if (stillWorkingTimer) {
           clearInterval(stillWorkingTimer);
         }
+
+        // Clean up listeners to prevent memory leaks
+        proc.stdout?.removeAllListeners();
+        proc.stderr?.removeAllListeners();
+        proc.removeAllListeners();
+
         if (session) {
           session.activeProcess = undefined;
         }
@@ -430,11 +449,21 @@ export class ClaudeClient {
 
     // Kill active process if running
     if (session.activeProcess) {
-      session.activeProcess.kill('SIGTERM');
+      this.cleanupProcess(session.activeProcess);
     }
 
     this.sessions.delete(chatId);
     return true;
+  }
+
+  /**
+   * Cleans up a child process by removing all listeners and killing it.
+   */
+  private cleanupProcess(proc: ChildProcess): void {
+    proc.stdout?.removeAllListeners();
+    proc.stderr?.removeAllListeners();
+    proc.removeAllListeners();
+    proc.kill('SIGTERM');
   }
 
   /**
@@ -447,7 +476,7 @@ export class ClaudeClient {
       for (const [chatId, session] of this.sessions) {
         if (now - session.lastActivity > this.idleTimeoutMs) {
           if (session.activeProcess) {
-            session.activeProcess.kill('SIGTERM');
+            this.cleanupProcess(session.activeProcess);
           }
           this.sessions.delete(chatId);
 
@@ -470,7 +499,7 @@ export class ClaudeClient {
 
     for (const [chatId, session] of this.sessions) {
       if (session.activeProcess) {
-        session.activeProcess.kill('SIGTERM');
+        this.cleanupProcess(session.activeProcess);
       }
       if (this.onSessionEnd) {
         this.onSessionEnd(chatId, 'Bridge shutting down');
