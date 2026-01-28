@@ -178,7 +178,7 @@ export class TelegramBot {
     this.bot.command('start', async (ctx) => {
       const chatId = ctx.chat.id;
       await ctx.reply(
-        'Claude Telegram Bridge\n\n' +
+        'Claudegram\n\n' +
         'Commands:\n' +
         '  /screenshot - List available displays\n' +
         '  /screenshot <n> - Capture display n\n' +

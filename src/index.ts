@@ -1,13 +1,12 @@
 #!/usr/bin/env node
 
 /**
- * Claude Telegram Bridge - Main Entry Point
+ * Claudegram - Main Entry Point
  *
- * This is the single local daemon that connects Claude Code terminal sessions
- * to Telegram as specified in project.md.
+ * Control Claude Code from Telegram with full PTY terminal support.
  *
  * Usage:
- *   claude-telegram-bridge start
+ *   claudegram
  *
  * Environment variables:
  *   TELEGRAM_BOT_TOKEN - Required: Telegram bot API token
@@ -21,8 +20,8 @@ import { loadConfig } from './config';
 import { TelegramBot } from './telegram/bot';
 
 async function main(): Promise<void> {
-  console.log('Claude Telegram Bridge');
-  console.log('======================\n');
+  console.log('Claudegram');
+  console.log('==========\n');
 
   // Load configuration
   let config;

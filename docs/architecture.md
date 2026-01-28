@@ -1,14 +1,14 @@
-# Architecture Documentation
+# Claudegram Architecture
 
 ## System Overview
 
-The Claude Telegram Bridge connects a real Claude Code terminal session to Telegram, providing full terminal fidelity through PTY (pseudo-terminal).
+Claudegram connects a real Claude Code terminal session to Telegram, providing full terminal fidelity through PTY (pseudo-terminal).
 
 ## Component Diagram
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                     Claude Bridge Agent                          │
+│                         Claudegram                               │
 │                                                                  │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
 │  │   Telegram   │  │   Session    │  │   Screenshot         │  │
@@ -49,16 +49,16 @@ Configuration management. Responsibilities:
 Telegram bot handler. Responsibilities:
 - Connect to Telegram Bot API
 - Route messages to appropriate handlers
-- Forward text/commands to PTY (Section 6.2)
-- Handle image downloads (Section 7)
-- Handle screenshot commands (Section 9)
+- Forward text/commands to PTY
+- Handle image downloads
+- Handle screenshot commands
 - Buffer and debounce PTY output
 - Enforce access control middleware
 
 ### src/pty/session.ts
 PTY session management. Responsibilities:
-- Spawn Claude Code in PTY (Section 5)
-- Manage one session per Telegram chat (Section 5.4)
+- Spawn Claude Code in PTY
+- Manage one session per Telegram chat
 - Forward input to PTY
 - Capture PTY output
 - Handle idle timeout
@@ -77,17 +77,17 @@ Access control. Responsibilities:
 
 ## Data Flows
 
-### Text Message Flow (Section 5.3)
+### Text Message Flow
 ```
 Telegram message
-    → Claude Bridge Agent
+    → Claudegram
     → PTY.write("<input>\n")
     → Claude Code CLI
     → PTY.read()
     → Telegram sendMessage
 ```
 
-### Image Input Flow (Section 7.1)
+### Image Input Flow
 ```
 Telegram image
     → Bot downloads image
@@ -96,7 +96,7 @@ Telegram image
     → Claude Code processes file
 ```
 
-### Screenshot Flow (Section 9)
+### Screenshot Flow
 ```
 /screenshot
     → List displays (system_profiler SPDisplaysDataType)
@@ -122,7 +122,7 @@ Telegram image
 - Telegram API errors: Logged, message delivery retried
 - Screenshot errors: Error message sent to user
 
-## Security Model (Section 10)
+## Security Model
 
 - User ID whitelist enforced at middleware level
 - Unauthorized users silently ignored

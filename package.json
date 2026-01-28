@@ -1,10 +1,10 @@
 {
-  "name": "claude-telegram-bridge",
+  "name": "claudegram",
   "version": "1.0.0",
-  "description": "A bridge connecting Claude Code terminal sessions to Telegram",
+  "description": "Control Claude Code from Telegram - Full PTY terminal bridge",
   "main": "dist/index.js",
   "bin": {
-    "claude-telegram-bridge": "./dist/index.js"
+    "claudegram": "./dist/index.js"
   },
   "scripts": {
     "build": "tsc",
@@ -16,8 +16,18 @@
     "telegram",
     "terminal",
     "pty",
-    "bridge"
+    "bridge",
+    "claudegram"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Nicolas-Arsenault/claudegram.git"
+  },
+  "homepage": "https://github.com/Nicolas-Arsenault/claudegram",
+  "bugs": {
+    "url": "https://github.com/Nicolas-Arsenault/claudegram/issues"
+  },
+  "author": "Nicolas Arsenault",
   "license": "MIT",
   "dependencies": {
     "node-pty": "^1.0.0",
