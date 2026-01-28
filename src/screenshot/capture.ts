@@ -1,9 +1,11 @@
 /**
  * Screenshot Capture Module
  *
- * Captures screenshots on macOS.
+ * Captures screenshots of windows on macOS.
  *
- * Uses native macOS screencapture tool.
+ * Uses:
+ * - Swift script with CGWindowListCopyWindowInfo for listing windows
+ * - screencapture -l <windowid> for capturing specific windows
  *
  * IMPORTANT: Requires Screen Recording permission in System Preferences > Privacy & Security
  */
@@ -15,11 +17,12 @@ import * as fs from 'fs/promises';
 
 const execAsync = promisify(exec);
 
-export interface DisplayInfo {
+export interface WindowInfo {
   index: number;
+  id: number;
   name: string;
-  resolution: string;
-  isMain: boolean;
+  owner: string;
+  bounds: string;
 }
 
 export interface ScreenshotResult {
@@ -27,6 +30,63 @@ export interface ScreenshotResult {
   filePath?: string;
   error?: string;
 }
+
+// Swift script for listing windows
+const SWIFT_LIST_WINDOWS = `
+import Cocoa
+
+struct WindowInfo: Codable {
+    let id: Int
+    let name: String
+    let owner: String
+    let width: Int
+    let height: Int
+}
+
+let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+guard let windowList = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
+    print("[]")
+    exit(0)
+}
+
+var windows: [WindowInfo] = []
+let skipOwners = ["Window Server", "Dock", "SystemUIServer", "Control Center", "Notification Center"]
+
+for win in windowList {
+    guard let owner = win[kCGWindowOwnerName as String] as? String,
+          let name = win[kCGWindowName as String] as? String,
+          let id = win[kCGWindowNumber as String] as? Int,
+          let bounds = win[kCGWindowBounds as String] as? [String: Any],
+          let width = bounds["Width"] as? CGFloat,
+          let height = bounds["Height"] as? CGFloat,
+          let layer = win[kCGWindowLayer as String] as? Int else {
+        continue
+    }
+
+    if name.isEmpty || layer < 0 || width < 100 || height < 100 {
+        continue
+    }
+    if skipOwners.contains(owner) {
+        continue
+    }
+
+    windows.append(WindowInfo(
+        id: id,
+        name: name,
+        owner: owner,
+        width: Int(width),
+        height: Int(height)
+    ))
+}
+
+let encoder = JSONEncoder()
+if let data = try? encoder.encode(windows),
+   let json = String(data: data, encoding: .utf8) {
+    print(json)
+} else {
+    print("[]")
+}
+`;
 
 export class ScreenshotCapture {
   private outputDir: string;
@@ -43,80 +103,87 @@ export class ScreenshotCapture {
   }
 
   /**
-   * Lists available displays using system_profiler.
+   * Lists visible windows using CGWindowListCopyWindowInfo via Swift.
    */
-  async listDisplays(): Promise<DisplayInfo[]> {
+  async listWindows(): Promise<WindowInfo[]> {
     try {
-      const { stdout } = await execAsync('system_profiler SPDisplaysDataType -json');
-      const data = JSON.parse(stdout);
+      // Use system Swift to avoid toolchain issues
+      const { stdout } = await execAsync(`/usr/bin/swift -e '${SWIFT_LIST_WINDOWS.replace(/'/g, "'\\''")}'`);
+      const windows = JSON.parse(stdout.trim());
 
-      const displays: DisplayInfo[] = [];
-      let index = 1;
-
-      for (const gpu of data.SPDisplaysDataType || []) {
-        for (const display of gpu.spdisplays_ndrvs || []) {
-          displays.push({
-            index: index++,
-            name: display._name || 'Unknown Display',
-            resolution: display._spdisplays_resolution || 'Unknown',
-            isMain: display.spdisplays_main === 'spdisplays_yes',
-          });
-        }
-      }
-
-      return displays;
+      return windows.map((win: any, idx: number) => ({
+        index: idx + 1,
+        id: win.id,
+        name: win.name,
+        owner: win.owner,
+        bounds: `${win.width}x${win.height}`,
+      }));
     } catch (error) {
-      // Fallback: assume at least one display exists
-      return [{
-        index: 1,
-        name: 'Main Display',
-        resolution: 'Unknown',
-        isMain: true,
-      }];
+      const errMsg = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to list windows: ${errMsg}`);
     }
   }
 
   /**
-   * Formats display list for Telegram output.
+   * Formats window list for Telegram output.
    */
-  formatDisplayList(displays: DisplayInfo[]): string {
-    if (displays.length === 0) {
-      return 'No displays found.';
+  formatWindowList(windows: WindowInfo[]): string {
+    if (windows.length === 0) {
+      return 'No windows found.\n\nMake sure Screen Recording permission is granted in:\nSystem Settings > Privacy & Security > Screen Recording';
     }
 
-    const lines = ['Available displays:'];
-    for (const display of displays) {
-      const mainIndicator = display.isMain ? ' (Main)' : '';
-      lines.push(`  ${display.index}. ${display.name}${mainIndicator}`);
-      lines.push(`     ${display.resolution}`);
+    const lines = ['Available windows:'];
+    for (const win of windows) {
+      // Truncate long window names
+      const name = win.name.length > 40 ? win.name.substring(0, 37) + '...' : win.name;
+      lines.push(`  ${win.index}. ${win.owner}`);
+      lines.push(`     ${name}`);
     }
 
     lines.push('');
-    lines.push('Use /screenshot <n> to capture display n.');
-    lines.push('');
-    lines.push('Note: Requires Screen Recording permission in');
-    lines.push('System Settings > Privacy & Security');
+    lines.push('Use /screenshot <n> to capture a window.');
 
     return lines.join('\n');
   }
 
   /**
-   * Captures a screenshot of the specified display.
+   * Captures a screenshot of the specified window.
    *
-   * @param displayIndex - The display index (1-based)
+   * @param windowIndex - The window index (1-based) from listWindows
    * @returns Screenshot result with file path or error
    */
-  async captureDisplay(displayIndex: number): Promise<ScreenshotResult> {
+  async captureWindow(windowIndex: number): Promise<ScreenshotResult> {
     await this.ensureOutputDir();
 
+    // Get windows to find the window ID
+    let windows: WindowInfo[];
+    try {
+      windows = await this.listWindows();
+    } catch (error) {
+      return {
+        success: false,
+        error: 'Failed to list windows. Grant Screen Recording permission.',
+      };
+    }
+
+    const window = windows.find(w => w.index === windowIndex);
+
+    if (!window) {
+      return {
+        success: false,
+        error: `Window ${windowIndex} not found. Use /screenshot to see available windows.`,
+      };
+    }
+
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const filename = `screenshot-${displayIndex}-${timestamp}.png`;
+    const safeName = window.owner.replace(/[^a-zA-Z0-9]/g, '_');
+    const filename = `screenshot-${safeName}-${timestamp}.png`;
     const filePath = path.join(this.outputDir, filename);
 
     try {
-      // screencapture -D uses 1-based display index
-      // -x suppresses sound
-      await execAsync(`screencapture -x -D ${displayIndex} "${filePath}"`);
+      // screencapture -l uses window ID (CGWindowID)
+      // -x suppresses sound, -o excludes shadow
+      await execAsync(`screencapture -x -o -l ${window.id} "${filePath}"`);
 
       // Verify the file was created and has content
       try {
@@ -124,31 +191,36 @@ export class ScreenshotCapture {
         if (stats.size > 0) {
           return { success: true, filePath };
         }
-        // Empty file means permission denied or invalid display
         await fs.unlink(filePath).catch(() => {});
         return {
           success: false,
-          error: 'Screenshot failed. Grant Screen Recording permission in System Settings > Privacy & Security.',
+          error: 'Screenshot failed. Grant Screen Recording permission in System Settings.',
         };
       } catch {
         return {
           success: false,
-          error: `Display ${displayIndex} not found or permission denied.`,
+          error: 'Screenshot failed. Window may have been closed.',
         };
       }
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
       return {
         success: false,
-        error: `Failed to capture screenshot: ${errMsg}`,
+        error: `Failed to capture: ${errMsg}`,
       };
     }
   }
 
-  /**
-   * Captures the main display.
-   */
-  async captureMainDisplay(): Promise<ScreenshotResult> {
-    return this.captureDisplay(1);
+  // Aliases for backward compatibility
+  async listDisplays(): Promise<WindowInfo[]> {
+    return this.listWindows();
+  }
+
+  formatDisplayList(windows: WindowInfo[]): string {
+    return this.formatWindowList(windows);
+  }
+
+  async captureDisplay(index: number): Promise<ScreenshotResult> {
+    return this.captureWindow(index);
   }
 }
