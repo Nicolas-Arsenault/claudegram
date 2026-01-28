@@ -65,11 +65,19 @@ export class SessionManager {
       return session;
     }
 
-    const shell = os.platform() === 'darwin' ? '/bin/zsh' : '/bin/bash';
     const workingDir = options.workingDir || process.cwd();
+    const homeDir = os.homedir();
+
+    // Ensure PATH includes common locations for claude binary
+    const additionalPaths = [
+      `${homeDir}/.local/bin`,
+      '/usr/local/bin',
+      '/opt/homebrew/bin',
+    ];
+    const currentPath = process.env.PATH || '';
+    const enhancedPath = [...additionalPaths, currentPath].join(':');
 
     // Spawn Claude Code in a PTY
-    // Using 'claude' command which should be in PATH after 'brew install claude'
     const ptyProcess = pty.spawn('claude', [], {
       name: 'xterm-256color',
       cols: 120,
@@ -77,6 +85,7 @@ export class SessionManager {
       cwd: workingDir,
       env: {
         ...process.env,
+        PATH: enhancedPath,
         TERM: 'xterm-256color',
         COLORTERM: 'truecolor',
       },
