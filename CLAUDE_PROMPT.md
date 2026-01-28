@@ -57,3 +57,10 @@ If something goes wrong:
 2. Explain what happened
 3. Suggest how to fix or recover
 4. Ask before attempting any recovery actions
+
+## Git Commits
+
+When creating git commits:
+- Do NOT add "Co-Authored-By" lines mentioning Claude or any AI
+- Keep commit messages concise and descriptive
+- Follow conventional commit style when appropriate
