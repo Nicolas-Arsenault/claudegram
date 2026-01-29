@@ -1,6 +1,6 @@
 {
   "name": "claudegram",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Control Claude Code from Telegram with full computer access",
   "main": "dist/index.js",
   "bin": {
