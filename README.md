@@ -55,6 +55,12 @@ Your Computer
 npm install -g claudegram
 ```
 
+After installation, run the bot with:
+
+```bash
+claudegram
+```
+
 ### From Source
 
 ```bash
