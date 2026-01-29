@@ -1,0 +1,29 @@
+# Source files (dist is published instead)
+src/
+
+# Development files
+.github/
+.claude/
+docs/
+screenshots/
+
+# Config files
+tsconfig.json
+.env*
+!.env.example
+
+# Project documentation (README is included)
+project.md
+
+# Git
+.git/
+.gitignore
+
+# Dependencies (installed by user)
+node_modules/
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+*.swo

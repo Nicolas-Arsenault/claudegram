@@ -8,9 +8,18 @@
   },
   "scripts": {
     "build": "tsc",
+    "clean": "rm -rf dist",
+    "prebuild": "npm run clean",
+    "prepublishOnly": "npm run build",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts"
   },
+  "files": [
+    "dist",
+    "CLAUDE_PROMPT.md",
+    "README.md",
+    ".env.example"
+  ],
   "keywords": [
     "claude",
     "telegram",
