@@ -49,6 +49,14 @@ Your Computer
 
 ## Installation
 
+### npm (Recommended)
+
+```bash
+npm install -g claudegram
+```
+
+### From Source
+
 ```bash
 git clone https://github.com/Nicolas-Arsenault/claudegram.git
 cd claudegram
@@ -112,8 +120,10 @@ This will open a browser for OAuth login with Anthropic. Once authenticated, Cla
 ```bash
 export TELEGRAM_BOT_TOKEN="123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
 export ALLOWED_USER_IDS="123456,789012"
-npm start
+claudegram
 ```
+
+If installed from source, use `npm start` instead of `claudegram`.
 
 ## Usage
 
