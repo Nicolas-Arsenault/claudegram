@@ -11,24 +11,30 @@ Claudegram connects a real Claude Code terminal session to Telegram, providing f
 │                         Claudegram                               │
 │                                                                  │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
-│  │   Telegram   │  │   Session    │  │   Screenshot         │  │
-│  │     Bot      │──│   Manager    │  │   Capture            │  │
-│  │  (telegraf)  │  │  (node-pty)  │  │  (screencapture)     │  │
+│  │   Telegram   │  │   AI Client  │  │   Screenshot         │  │
+│  │     Bot      │──│   Interface  │  │   Capture            │  │
+│  │  (telegraf)  │  │              │  │  (screencapture)     │  │
 │  └──────────────┘  └──────────────┘  └──────────────────────┘  │
 │         │                 │                    │                 │
-│         │                 │                    │                 │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
-│  │   Access     │  │   Config     │  │   File System        │  │
-│  │   Control    │  │   Loader     │  │   (inputs/           │  │
-│  │              │  │              │  │    screenshots/)     │  │
-│  └──────────────┘  └──────────────┘  └──────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-         │                 │
-         ▼                 ▼
-┌──────────────┐   ┌──────────────┐
-│   Telegram   │   │   Claude     │
-│   Bot API    │   │   Code CLI   │
-└──────────────┘   └──────────────┘
+│         │          ┌──────┴──────┐             │                 │
+│         │          │             │             │                 │
+│  ┌──────────────┐  ▼             ▼  ┌──────────────────────┐  │
+│  │   Access     │ ┌────────┐ ┌────────┐ │   File System     │  │
+│  │   Control    │ │ Claude │ │ Codex  │ │   (inputs/        │  │
+│  │              │ │ Client │ │ Client │ │    screenshots/)  │  │
+│  └──────────────┘ └────────┘ └────────┘ └───────────────────┘  │
+│         │                 │       │              │               │
+│  ┌──────────────┐        │       │                              │
+│  │   Config     │        │       │                              │
+│  │   Loader     │        │       │                              │
+│  └──────────────┘        │       │                              │
+└──────────────────────────│───────│──────────────────────────────┘
+         │                 │       │
+         ▼                 ▼       ▼
+┌──────────────┐   ┌──────────────┐   ┌──────────────┐
+│   Telegram   │   │   Claude     │   │   OpenAI     │
+│   Bot API    │   │   Code CLI   │   │   Codex CLI  │
+└──────────────┘   └──────────────┘   └──────────────┘
 ```
 
 ## Module Responsibilities
@@ -43,24 +49,41 @@ Main entry point. Responsibilities:
 Configuration management. Responsibilities:
 - Load environment variables
 - Validate required configuration
+- Select AI backend (Claude or Codex)
 - Provide typed configuration object
 
 ### src/telegram/bot.ts
 Telegram bot handler. Responsibilities:
 - Connect to Telegram Bot API
 - Route messages to appropriate handlers
-- Forward text/commands to PTY
+- Create AI client based on configuration
+- Forward text/commands to AI client
 - Handle image downloads
 - Handle screenshot commands
-- Buffer and debounce PTY output
+- Buffer and debounce AI output
 - Enforce access control middleware
 
-### src/pty/session.ts
-PTY session management. Responsibilities:
-- Spawn Claude Code in PTY
+### src/sdk/types.ts
+Shared types and interfaces. Responsibilities:
+- Define AIClient interface
+- Define AIResponse, SessionState, ProgressEvent types
+- Define callback types for session events
+
+### src/sdk/client.ts (ClaudeClient)
+Claude Code SDK client. Responsibilities:
+- Implement AIClient interface for Claude Code CLI
+- Spawn Claude Code in non-interactive mode
 - Manage one session per Telegram chat
-- Forward input to PTY
-- Capture PTY output
+- Parse stream-json output for progress events
+- Handle idle timeout
+- Clean up on session end
+
+### src/sdk/codex-client.ts (CodexClient)
+OpenAI Codex SDK client. Responsibilities:
+- Implement AIClient interface for Codex CLI
+- Spawn Codex in exec mode with JSON output
+- Manage one session per Telegram chat
+- Parse JSON events for progress updates
 - Handle idle timeout
 - Clean up on session end
 
@@ -81,9 +104,9 @@ Access control. Responsibilities:
 ```
 Telegram message
     → Claudegram
-    → PTY.write("<input>\n")
-    → Claude Code CLI
-    → PTY.read()
+    → AIClient.sendMessage()
+    → Claude Code CLI or Codex CLI
+    → Parse response/events
     → Telegram sendMessage
 ```
 
@@ -92,8 +115,8 @@ Telegram message
 Telegram image
     → Bot downloads image
     → Image saved to ./inputs/
-    → PTY.write("User sent an image: <path>\n<caption>")
-    → Claude Code processes file
+    → AIClient.sendImage(path, caption)
+    → AI processes file
 ```
 
 ### Screenshot Flow

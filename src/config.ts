@@ -8,6 +8,7 @@
  * - ALLOWED_USER_IDS: Comma-separated list of allowed Telegram user IDs
  *
  * Optional environment variables:
+ * - AI_BACKEND: AI backend to use - 'claude' or 'codex' (default: 'claude')
  * - SCREENSHOT_OUTPUT_DIR: Directory for screenshots (default: ./screenshots)
  * - INPUT_IMAGE_DIR: Directory for received images (default: ./inputs)
  * - SESSION_IDLE_TIMEOUT_MS: Idle timeout in ms (default: 3 hours)
@@ -15,9 +16,15 @@
 
 import * as path from 'path';
 
+/**
+ * Supported AI backends.
+ */
+export type AIBackend = 'claude' | 'codex';
+
 export interface Config {
   telegramBotToken: string;
   allowedUserIds: number[];
+  aiBackend: AIBackend;
   screenshotOutputDir: string;
   inputImageDir: string;
   sessionIdleTimeoutMs: number;
@@ -55,6 +62,13 @@ export function loadConfig(): Config {
     throw new Error('ALLOWED_USER_IDS must contain at least one user ID');
   }
 
+  // Parse AI backend selection (default: claude)
+  const aiBackendStr = process.env.AI_BACKEND?.toLowerCase() || 'claude';
+  if (aiBackendStr !== 'claude' && aiBackendStr !== 'codex') {
+    throw new Error(`Invalid AI_BACKEND: ${aiBackendStr}. Must be 'claude' or 'codex'`);
+  }
+  const aiBackend: AIBackend = aiBackendStr;
+
   // Use __dirname to resolve relative to the package, not cwd
   const packageRoot = path.resolve(__dirname, '..');
 
@@ -91,6 +105,7 @@ export function loadConfig(): Config {
   return {
     telegramBotToken,
     allowedUserIds,
+    aiBackend,
     screenshotOutputDir,
     inputImageDir,
     sessionIdleTimeoutMs,

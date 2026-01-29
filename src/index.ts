@@ -28,6 +28,7 @@ async function main(): Promise<void> {
   try {
     config = loadConfig();
     console.log('Configuration loaded successfully.');
+    console.log(`  AI backend: ${config.aiBackend}`);
     console.log(`  Allowed users: ${config.allowedUserIds.join(', ')}`);
     console.log(`  Screenshot dir: ${config.screenshotOutputDir}`);
     console.log(`  Input image dir: ${config.inputImageDir}`);

@@ -9,12 +9,13 @@ This document is intended to be persistently referenced by Claude Code while imp
 
 ## 1. System Objective
 
-Build a minimal-setup application that allows developers to interact with a real Claude Code terminal through Telegram, with full terminal fidelity.
+Build a minimal-setup application that allows developers to interact with AI coding assistants through Telegram.
 
 The system must support:
-- Full interactive terminal control using a real PTY
-- Native Claude slash commands (no re-implementation)
-- Image input sent from Telegram to Claude Code
+- Multiple AI backends: Claude Code CLI and OpenAI Codex CLI
+- Configurable backend selection via environment variable
+- Native AI slash commands (no re-implementation)
+- Image input sent from Telegram to the AI
 - Screenshot capture from the host machine
 - Screenshot delivery to Telegram
 - macOS / Unix only (Windows explicitly out of scope)
@@ -247,10 +248,11 @@ Flow:
 
 Environment variables:
 
-TELEGRAM_BOT_TOKEN=<token>  
-ALLOWED_USER_IDS=123456,789012  
+TELEGRAM_BOT_TOKEN=<token>
+ALLOWED_USER_IDS=123456,789012
 
 Optional:
+- AI_BACKEND=claude | codex (default: claude)
 - SCREENSHOT_OUTPUT_DIR=./screenshots
 - INPUT_IMAGE_DIR=./inputs
 
@@ -283,11 +285,11 @@ No cloud dependency.
 ## 14. Summary
 
 This system provides:
-- A real PTY-backed Claude Code terminal
+- Support for multiple AI backends (Claude Code and OpenAI Codex)
 - Telegram-based remote interaction
 - File-based image and screenshot workflows
 - Native macOS / Unix tooling
-- Minimal setup with maximum terminal fidelity
+- Minimal setup with clean abstraction
 
 This document is authoritative and must be followed by Claude Code during implementation.
 

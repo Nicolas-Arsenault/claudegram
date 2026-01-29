@@ -1,7 +1,7 @@
 {
   "name": "claudegram",
-  "version": "2.0.2",
-  "description": "Control Claude Code from Telegram with full computer access",
+  "version": "2.1.0",
+  "description": "Control Claude Code or OpenAI Codex from Telegram with full computer access",
   "main": "dist/index.js",
   "bin": {
     "claudegram": "./dist/index.js"
@@ -22,6 +22,8 @@
   ],
   "keywords": [
     "claude",
+    "codex",
+    "openai",
     "telegram",
     "sdk",
     "bridge",

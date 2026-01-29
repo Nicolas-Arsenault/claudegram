@@ -1,12 +1,12 @@
 # Claudegram
 
-Control Claude Code from Telegram with full computer access.
+Control AI coding assistants (Claude Code or OpenAI Codex) from Telegram with full computer access.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
 ## Overview
 
-Claudegram bridges Claude Code to Telegram, letting you interact with Claude from anywhere. Claude has full computer access via `--dangerously-skip-permissions`, enabling file operations, bash commands, and more.
+Claudegram bridges AI coding assistants to Telegram, letting you interact with them from anywhere. Supports both **Claude Code** and **OpenAI Codex CLI** as backends. The AI has full computer access, enabling file operations, bash commands, and more.
 
 ## Screenshots
 
@@ -18,11 +18,12 @@ Claudegram bridges Claude Code to Telegram, letting you interact with Claude fro
 
 ## Features
 
-- **Full Computer Access** — Claude can read/write files, execute commands, etc.
-- **Real-time Progress** — See what Claude is doing (reading files, running commands, etc.)
+- **Multiple AI Backends** — Choose between Claude Code CLI or OpenAI Codex CLI
+- **Full Computer Access** — AI can read/write files, execute commands, etc.
+- **Real-time Progress** — See what the AI is doing (reading files, running commands, etc.)
 - **Streaming Updates** — Tool usage displayed as it happens, with 30s fallback messages
 - **Security Prompts** — Configurable system prompt to require confirmation before actions
-- **Image Input** — Send images from Telegram to Claude Code
+- **Image Input** — Send images from Telegram to the AI
 - **Screenshots** — Capture and receive screenshots from the host machine
 - **Direct Shell Access** — Execute commands directly via `/cmd`
 - **Secure Access** — Telegram user ID whitelist
@@ -33,9 +34,10 @@ Claudegram bridges Claude Code to Telegram, letting you interact with Claude fro
 Telegram Client
     ↕ (Telegram Bot API)
 Claudegram
-    ↕ (Claude Code SDK/CLI with stream-json)
-Claude Code
-    ↕ (--dangerously-skip-permissions)
+    ↕ (AI Client Interface)
+    ├── Claude Code CLI (--dangerously-skip-permissions)
+    └── OpenAI Codex CLI (--full-auto)
+    ↕
 Your Computer
 ```
 
@@ -43,7 +45,9 @@ Your Computer
 
 - macOS (screenshot feature is macOS-only)
 - Node.js >= 18.0.0
-- Claude Code CLI installed and authenticated
+- **One of the following AI CLIs:**
+  - Claude Code CLI installed and authenticated (`claude`), OR
+  - OpenAI Codex CLI installed and authenticated (`npm i -g @openai/codex && codex auth`)
 - Telegram Bot Token (via @BotFather)
 - **Screen Recording permission** for screenshots (System Settings > Privacy & Security > Screen Recording)
 
@@ -116,16 +120,31 @@ This will open a browser for OAuth login with Anthropic. Once authenticated, Cla
 |----------|----------|-------------|
 | `TELEGRAM_BOT_TOKEN` | Yes | Telegram bot API token |
 | `ALLOWED_USER_IDS` | Yes | Comma-separated Telegram user IDs |
+| `AI_BACKEND` | No | AI backend: `claude` or `codex` (default: `claude`) |
 | `SYSTEM_PROMPT_FILE` | No | Path to custom system prompt file (default: `CLAUDE_PROMPT.md` in package root) |
 | `SCREENSHOT_OUTPUT_DIR` | No | Screenshot directory (default: `./screenshots`) |
 | `INPUT_IMAGE_DIR` | No | Image directory (default: `./inputs`) |
 | `SESSION_IDLE_TIMEOUT_MS` | No | Idle timeout in ms (default: 10800000 / 3 hours) |
 
-### Example
+### Example (Claude Code)
 
 ```bash
 export TELEGRAM_BOT_TOKEN="123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
 export ALLOWED_USER_IDS="123456,789012"
+claudegram
+```
+
+### Example (OpenAI Codex)
+
+```bash
+# Install and authenticate Codex CLI first
+npm install -g @openai/codex
+codex auth
+
+# Then run Claudegram with Codex backend
+export TELEGRAM_BOT_TOKEN="123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+export ALLOWED_USER_IDS="123456,789012"
+export AI_BACKEND="codex"
 claudegram
 ```
 
@@ -198,19 +217,22 @@ The default prompt is automatically loaded regardless of which directory you sta
 ## Session Model
 
 - **Explicit start** — Use `/start` to create a session (no auto-creation)
-- **Persistent context** — Claude retains full context within a session via `--resume`
-- **One session per chat** — Each Telegram chat has its own Claude instance
+- **Persistent context** — AI retains full context within a session via session resume
+- **One session per chat** — Each Telegram chat has its own AI instance
 - **3-hour timeout** — Sessions end after 3 hours of inactivity (configurable)
 - **Manual termination** — Use `/kill` to end a session early
-- **Clean process management** — `/kill` terminates any running Claude process
+- **Clean process management** — `/kill` terminates any running AI process
 
 ## Project Structure
 
 ```
 src/
 ├── index.ts              # Entry point
-├── config.ts             # Configuration
-├── sdk/client.ts         # Claude Code SDK client with streaming
+├── config.ts             # Configuration (incl. AI backend selection)
+├── sdk/
+│   ├── types.ts          # AIClient interface & shared types
+│   ├── client.ts         # Claude Code SDK client
+│   └── codex-client.ts   # OpenAI Codex SDK client
 ├── telegram/bot.ts       # Telegram handler with progress updates
 ├── screenshot/capture.ts # Screenshot (macOS)
 └── security/access.ts    # Access control

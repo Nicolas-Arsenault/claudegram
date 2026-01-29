@@ -1,7 +1,7 @@
 /**
  * Telegram Bot Handler
  *
- * Implements the Telegram bot interface using the Claude Code SDK
+ * Implements the Telegram bot interface using AI clients (Claude Code or OpenAI Codex)
  * for clean, reliable communication without terminal parsing issues.
  */
 
@@ -12,17 +12,36 @@ import * as path from 'path';
 import * as https from 'https';
 import { exec } from 'child_process';
 
-import { ClaudeClient, ProgressEvent } from '../sdk/client';
+import { AIClient, ProgressEvent } from '../sdk/types';
+import { ClaudeClient } from '../sdk/client';
+import { CodexClient } from '../sdk/codex-client';
 import { ScreenshotCapture } from '../screenshot/capture';
 import { AccessControl } from '../security/access';
 import { Config } from '../config';
+
+/**
+ * Creates the appropriate AI client based on configuration.
+ */
+function createAIClient(config: Config): AIClient {
+  const idleTimeout = config.sessionIdleTimeoutMs;
+  const workingDir = process.cwd();
+  const systemPrompt = config.systemPromptFile;
+
+  switch (config.aiBackend) {
+    case 'codex':
+      return new CodexClient(idleTimeout, workingDir, systemPrompt);
+    case 'claude':
+    default:
+      return new ClaudeClient(idleTimeout, workingDir, systemPrompt);
+  }
+}
 
 // Minimum interval between progress updates per chat (10 seconds)
 const PROGRESS_THROTTLE_MS = 10000;
 
 export class TelegramBot {
   private bot: Telegraf;
-  private claudeClient: ClaudeClient;
+  private aiClient: AIClient;
   private screenshotCapture: ScreenshotCapture;
   private accessControl: AccessControl;
   private inputImageDir: string;
@@ -30,11 +49,7 @@ export class TelegramBot {
 
   constructor(config: Config) {
     this.bot = new Telegraf(config.telegramBotToken);
-    this.claudeClient = new ClaudeClient(
-      config.sessionIdleTimeoutMs,
-      process.cwd(),
-      config.systemPromptFile
-    );
+    this.aiClient = createAIClient(config);
     this.screenshotCapture = new ScreenshotCapture(config.screenshotOutputDir);
     this.accessControl = new AccessControl(config.allowedUserIds);
     this.inputImageDir = config.inputImageDir;
@@ -47,11 +62,11 @@ export class TelegramBot {
    * Sets up callbacks for session termination and progress updates.
    */
   private setupSessionCallbacks(): void {
-    this.claudeClient.setSessionEndCallback((chatId, reason) => {
+    this.aiClient.setSessionEndCallback((chatId, reason) => {
       this.sendMessage(chatId, `Session ended: ${reason}`);
     });
 
-    this.claudeClient.setProgressCallback((chatId, event) => {
+    this.aiClient.setProgressCallback((chatId, event) => {
       this.sendProgressUpdate(chatId, event);
     });
   }
@@ -156,7 +171,7 @@ export class TelegramBot {
     this.bot.command('start', async (ctx) => {
       const chatId = ctx.chat.id;
 
-      if (this.claudeClient.hasSession(chatId)) {
+      if (this.aiClient.hasSession(chatId)) {
         await ctx.reply(
           'Claude session already active.\n\n' +
           'Use /kill to terminate and /start again for a fresh session.'
@@ -164,7 +179,7 @@ export class TelegramBot {
         return;
       }
 
-      this.claudeClient.createSession(chatId);
+      this.aiClient.createSession(chatId);
       await ctx.reply(
         'Starting new Claude Code session...\n\n' +
         'This is a fresh session with no previous context.\n\n' +
@@ -186,7 +201,7 @@ export class TelegramBot {
     // Handle /kill command
     this.bot.command('kill', async (ctx) => {
       const chatId = ctx.chat.id;
-      if (this.claudeClient.killSession(chatId)) {
+      if (this.aiClient.killSession(chatId)) {
         await ctx.reply(
           'Claude session terminated.\n\n' +
           'Use /start to begin a new session.'
@@ -199,7 +214,7 @@ export class TelegramBot {
     // Handle /status command
     this.bot.command('status', async (ctx) => {
       const chatId = ctx.chat.id;
-      if (this.claudeClient.hasSession(chatId)) {
+      if (this.aiClient.hasSession(chatId)) {
         await ctx.reply(
           'Session active.\n\n' +
           'Claude Code is ready to receive messages.'
@@ -350,7 +365,7 @@ export class TelegramBot {
       const fileUrl = `https://api.telegram.org/file/bot${this.bot.telegram.token}/${file.file_path}`;
       await this.downloadFile(fileUrl, localPath);
 
-      if (!this.claudeClient.hasSession(chatId)) {
+      if (!this.aiClient.hasSession(chatId)) {
         await ctx.reply(
           'Image saved, but no active Claude session.\n\n' +
           'Use /start to begin a session, then send the image again.'
@@ -362,7 +377,7 @@ export class TelegramBot {
       await ctx.reply('🖼️ Image saved. Processing...');
 
       // Process in background to avoid Telegraf timeout
-      this.claudeClient.sendImage(chatId, localPath, caption)
+      this.aiClient.sendImage(chatId, localPath, caption)
         .then(async (response) => {
           if (response.success) {
             await this.sendMessage(chatId, response.output);
@@ -418,7 +433,7 @@ export class TelegramBot {
     const chatId = ctx.chat!.id;
     const text = message.text;
 
-    if (!this.claudeClient.hasSession(chatId)) {
+    if (!this.aiClient.hasSession(chatId)) {
       await ctx.reply(
         'No active Claude session.\n\n' +
         'Use /start to begin a new session.'
@@ -441,7 +456,7 @@ export class TelegramBot {
    * This allows long-running tasks without blocking Telegraf's update handler.
    */
   private async processClaudeMessage(chatId: number, text: string): Promise<void> {
-    const response = await this.claudeClient.sendMessage(chatId, text);
+    const response = await this.aiClient.sendMessage(chatId, text);
 
     if (response.success) {
       if (response.output) {
@@ -472,7 +487,7 @@ export class TelegramBot {
    */
   async stop(): Promise<void> {
     console.log('Stopping Telegram bot...');
-    this.claudeClient.shutdown();
+    this.aiClient.shutdown();
     this.bot.stop('SIGTERM');
     console.log('Telegram bot stopped.');
   }

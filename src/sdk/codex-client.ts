@@ -1,7 +1,7 @@
 /**
- * Claude Code SDK Client
+ * OpenAI Codex CLI Client
  *
- * Provides a clean programmatic interface to Claude Code,
+ * Provides a programmatic interface to OpenAI Codex CLI,
  * with streaming progress updates for long-running tasks.
  *
  * Implements the AIClient interface for use with the Telegram bot.
@@ -20,28 +20,22 @@ import {
   ProgressCallback,
 } from './types';
 
-// Re-export types for backwards compatibility
-export { AIResponse, SessionState, ProgressEvent } from './types';
-
-// Legacy type alias for backwards compatibility
-export type ClaudeResponse = AIResponse;
-
 // Interval for "still working" fallback messages (45 seconds)
 const STILL_WORKING_INTERVAL_MS = 45000;
 
 /**
- * Finds the Claude CLI binary path.
+ * Finds the Codex CLI binary path.
  */
-function findClaudeBinary(): string {
+function findCodexBinary(): string {
   const homeDir = os.homedir();
-  const claudePaths = [
-    `${homeDir}/.local/bin/claude`,
-    '/usr/local/bin/claude',
-    '/opt/homebrew/bin/claude',
-    'claude',
+  const codexPaths = [
+    `${homeDir}/.local/bin/codex`,
+    '/usr/local/bin/codex',
+    '/opt/homebrew/bin/codex',
+    'codex',
   ];
 
-  for (const p of claudePaths) {
+  for (const p of codexPaths) {
     try {
       fs.accessSync(p, fs.constants.X_OK);
       return p;
@@ -50,15 +44,17 @@ function findClaudeBinary(): string {
     }
   }
 
-  return 'claude';
+  return 'codex';
 }
 
 /**
  * Formats a tool use into a human-readable message.
+ * Codex uses similar tool names to Claude.
  */
 function formatToolUse(toolName: string, input: any): string {
   switch (toolName) {
-    case 'Bash':
+    case 'shell':
+    case 'bash':
       if (input?.command) {
         const cmd = input.command.length > 100
           ? input.command.substring(0, 97) + '...'
@@ -67,54 +63,41 @@ function formatToolUse(toolName: string, input: any): string {
       }
       return 'Running command...';
 
-    case 'Read':
-      if (input?.file_path) {
-        return `Reading: ${input.file_path}`;
+    case 'read_file':
+    case 'read':
+      if (input?.file_path || input?.path) {
+        return `Reading: ${input.file_path || input.path}`;
       }
       return 'Reading file...';
 
-    case 'Write':
-      if (input?.file_path) {
-        return `Writing: ${input.file_path}`;
+    case 'write_file':
+    case 'write':
+      if (input?.file_path || input?.path) {
+        return `Writing: ${input.file_path || input.path}`;
       }
       return 'Writing file...';
 
-    case 'Edit':
-      if (input?.file_path) {
-        return `Editing: ${input.file_path}`;
+    case 'edit_file':
+    case 'edit':
+      if (input?.file_path || input?.path) {
+        return `Editing: ${input.file_path || input.path}`;
       }
       return 'Editing file...';
 
-    case 'Glob':
-      if (input?.pattern) {
-        return `Searching files: ${input.pattern}`;
+    case 'list_dir':
+    case 'glob':
+      if (input?.path || input?.pattern) {
+        return `Listing: ${input.path || input.pattern}`;
       }
-      return 'Searching files...';
+      return 'Listing directory...';
 
-    case 'Grep':
-      if (input?.pattern) {
+    case 'search':
+    case 'grep':
+      if (input?.pattern || input?.query) {
         const path = input.path ? ` in ${input.path}` : '';
-        return `Searching for: "${input.pattern}"${path}`;
+        return `Searching for: "${input.pattern || input.query}"${path}`;
       }
       return 'Searching content...';
-
-    case 'WebFetch':
-      if (input?.url) {
-        return `Fetching: ${input.url}`;
-      }
-      return 'Fetching URL...';
-
-    case 'WebSearch':
-      if (input?.query) {
-        return `Searching web: "${input.query}"`;
-      }
-      return 'Searching web...';
-
-    case 'Task':
-      if (input?.description) {
-        return `Spawning agent: ${input.description}`;
-      }
-      return 'Spawning agent...';
 
     default:
       return `Using ${toolName}...`;
@@ -122,40 +105,50 @@ function formatToolUse(toolName: string, input: any): string {
 }
 
 /**
- * Parses a stream-json line from Claude CLI and extracts relevant progress info.
+ * Parses a JSON event from Codex CLI and extracts relevant progress info.
+ * Codex outputs JSON events when using --json flag.
  */
-function parseStreamEvent(line: string): ProgressEvent | null {
+function parseCodexEvent(line: string): ProgressEvent | null {
   try {
     const event = JSON.parse(line);
 
-    // Handle different event types from Claude's stream-json output
-    if (event.type === 'assistant' && event.message?.content) {
-      // Assistant is producing output - check for tool use
-      for (const block of event.message.content) {
-        if (block.type === 'tool_use') {
-          const toolName = block.name || 'unknown tool';
-          const message = formatToolUse(toolName, block.input);
+    // Handle Codex event types
+    // Codex emits events like: { type: "function_call", name: "shell", arguments: {...} }
+    if (event.type === 'function_call' || event.type === 'tool_call') {
+      const toolName = event.name || event.function?.name || 'unknown tool';
+      const input = event.arguments || event.function?.arguments || {};
+      const message = formatToolUse(toolName, typeof input === 'string' ? JSON.parse(input) : input);
 
+      return {
+        type: 'tool_use',
+        message,
+      };
+    }
+
+    // Handle thinking/reasoning events
+    if (event.type === 'thinking' || event.type === 'reasoning') {
+      return {
+        type: 'thinking',
+        message: 'Thinking...',
+      };
+    }
+
+    // Handle message events with tool calls
+    if (event.type === 'message' && event.content) {
+      for (const block of Array.isArray(event.content) ? event.content : [event.content]) {
+        if (block.type === 'tool_use' || block.type === 'function_call') {
+          const toolName = block.name || 'unknown tool';
+          const message = formatToolUse(toolName, block.input || block.arguments);
           return {
             type: 'tool_use',
             message,
           };
-        } else if (block.type === 'thinking') {
-          return {
-            type: 'thinking',
-            message: 'Thinking...',
-          };
         }
       }
-    } else if (event.type === 'content_block_start') {
-      if (event.content_block?.type === 'tool_use') {
-        const toolName = event.content_block.name || 'tool';
-        return {
-          type: 'tool_use',
-          message: `Starting ${toolName}...`,
-        };
-      }
-    } else if (event.type === 'result') {
+    }
+
+    // Handle completion/result events
+    if (event.type === 'result' || event.type === 'done' || event.type === 'complete') {
       return {
         type: 'result',
         message: 'Completed',
@@ -169,23 +162,23 @@ function parseStreamEvent(line: string): ProgressEvent | null {
   }
 }
 
-export class ClaudeClient implements AIClient {
+export class CodexClient implements AIClient {
   private sessions: Map<number, SessionState> = new Map();
   private idleTimeoutMs: number;
   private idleCheckInterval: NodeJS.Timeout | null = null;
   private onSessionEnd: SessionEndCallback | null = null;
   private onProgress: ProgressCallback | null = null;
-  private claudePath: string;
+  private codexPath: string;
   private workingDir: string;
   private systemPromptFile: string | null;
 
   constructor(idleTimeoutMs: number = 1800000, workingDir?: string, systemPromptFile?: string | null) {
     this.idleTimeoutMs = idleTimeoutMs;
-    this.claudePath = findClaudeBinary();
+    this.codexPath = findCodexBinary();
     this.workingDir = workingDir || process.cwd();
     this.systemPromptFile = systemPromptFile || null;
     this.startIdleCheck();
-    console.log(`Claude SDK client initialized, using: ${this.claudePath}`);
+    console.log(`Codex SDK client initialized, using: ${this.codexPath}`);
     if (this.systemPromptFile) {
       console.log(`Using system prompt from: ${this.systemPromptFile}`);
     }
@@ -226,10 +219,10 @@ export class ClaudeClient implements AIClient {
   }
 
   /**
-   * Sends a message to Claude and returns the response.
+   * Sends a message to Codex and returns the response.
    * Streams progress events during execution.
    */
-  async sendMessage(chatId: number, message: string): Promise<ClaudeResponse> {
+  async sendMessage(chatId: number, message: string): Promise<AIResponse> {
     const session = this.sessions.get(chatId);
     if (!session) {
       return {
@@ -241,24 +234,19 @@ export class ClaudeClient implements AIClient {
 
     session.lastActivity = Date.now();
 
+    // Build arguments for codex exec
+    // codex exec runs non-interactively, reading prompt from stdin
     const args = [
-      '-p',  // --print shorthand
-      '--dangerously-skip-permissions',
-      '--output-format', 'stream-json',
-      '--verbose',
+      'exec',
+      '--json',  // Enable JSON streaming output
+      '--full-auto',  // Skip approval prompts (equivalent to Claude's --dangerously-skip-permissions)
     ];
 
-    // Add system prompt if configured
-    if (this.systemPromptFile) {
-      args.push('--system-prompt', this.systemPromptFile);
-    }
-
-    // Use --resume to continue conversation if we've already started
-    if (session.conversationStarted) {
-      args.push('--resume', session.sessionId);
+    // Resume session if we've already started a conversation
+    if (session.conversationStarted && session.sessionId) {
+      // Codex uses: codex exec resume <session_id>
+      args.splice(1, 0, 'resume', session.sessionId);
     } else {
-      // First message - set session ID for future resumption
-      args.push('--session-id', session.sessionId);
       session.conversationStarted = true;
     }
 
@@ -266,9 +254,9 @@ export class ClaudeClient implements AIClient {
   }
 
   /**
-   * Sends an image path notification to Claude.
+   * Sends an image path notification to Codex.
    */
-  async sendImage(chatId: number, imagePath: string, caption?: string): Promise<ClaudeResponse> {
+  async sendImage(chatId: number, imagePath: string, caption?: string): Promise<AIResponse> {
     const message = caption
       ? `User sent an image: ${imagePath}\n${caption}`
       : `User sent an image: ${imagePath}\nPlease inspect this image.`;
@@ -277,9 +265,9 @@ export class ClaudeClient implements AIClient {
   }
 
   /**
-   * Executes a Claude CLI command with streaming progress.
+   * Executes a Codex CLI command with streaming progress.
    */
-  private executeCommand(chatId: number, args: string[], message: string): Promise<ClaudeResponse> {
+  private executeCommand(chatId: number, args: string[], message: string): Promise<AIResponse> {
     return new Promise((resolve) => {
       let outputText = '';
       let stderr = '';
@@ -288,7 +276,7 @@ export class ClaudeClient implements AIClient {
       let workingMinutes = 0;
       const startTime = Date.now();
 
-      const proc = spawn(this.claudePath, args, {
+      const proc = spawn(this.codexPath, args, {
         cwd: this.workingDir,
         env: {
           ...process.env,
@@ -339,7 +327,7 @@ export class ClaudeClient implements AIClient {
           if (!line.trim()) continue;
 
           // Try to parse as stream event
-          const event = parseStreamEvent(line);
+          const event = parseCodexEvent(line);
           if (event && this.onProgress) {
             resetStillWorkingTimer();
             // Don't send 'result' events as progress - that's the final state
@@ -353,18 +341,30 @@ export class ClaudeClient implements AIClient {
           // Try to extract final result text
           try {
             const parsed = JSON.parse(line);
-            if (parsed.type === 'result' && parsed.result) {
-              outputText = parsed.result;
-            } else if (parsed.type === 'assistant' && parsed.message?.content) {
-              // Collect text blocks from assistant messages
-              for (const block of parsed.message.content) {
+            // Handle Codex result formats
+            if (parsed.type === 'result' || parsed.type === 'done') {
+              if (parsed.output || parsed.text || parsed.content) {
+                outputText = parsed.output || parsed.text || parsed.content;
+              }
+            } else if (parsed.type === 'message' && parsed.content) {
+              // Collect text from message content
+              const content = Array.isArray(parsed.content) ? parsed.content : [parsed.content];
+              for (const block of content) {
                 if (block.type === 'text' && block.text) {
                   outputText += block.text;
+                } else if (typeof block === 'string') {
+                  outputText += block;
                 }
               }
+            } else if (parsed.type === 'assistant' && parsed.text) {
+              outputText += parsed.text;
             }
           } catch {
-            // Not JSON, ignore
+            // Not JSON, might be plain text output
+            // Some Codex modes output plain text
+            if (!line.startsWith('{')) {
+              outputText += line + '\n';
+            }
           }
         }
       });
@@ -419,7 +419,7 @@ export class ClaudeClient implements AIClient {
         resolve({
           success: false,
           output: '',
-          error: `Failed to spawn Claude: ${err.message}`,
+          error: `Failed to spawn Codex: ${err.message}`,
         });
       });
     });
