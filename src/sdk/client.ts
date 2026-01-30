@@ -412,6 +412,7 @@ export class ClaudeClient implements AIClient {
         proc.stdout?.removeAllListeners();
         proc.stderr?.removeAllListeners();
         proc.removeAllListeners();
+        proc.kill();
 
         if (session) {
           session.activeProcess = undefined;
