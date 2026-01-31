@@ -18,6 +18,7 @@ import {
   ProgressEvent,
   SessionEndCallback,
   ProgressCallback,
+  UserInputQuestion,
 } from './types';
 
 // Re-export types for backwards compatibility
@@ -54,70 +55,141 @@ function findClaudeBinary(): string {
 }
 
 /**
- * Formats a tool use into a human-readable message.
+ * Result of parsing a tool use - can be a simple message or a special event.
  */
-function formatToolUse(toolName: string, input: any): string {
+interface ToolParseResult {
+  type: 'tool_use' | 'user_input_needed' | 'plan_start' | 'plan_exit' | 'task_update';
+  message: string;
+  questions?: UserInputQuestion[];
+  taskInfo?: {
+    action: 'create' | 'update' | 'list';
+    subject?: string;
+    status?: string;
+  };
+}
+
+/**
+ * Formats a tool use into a human-readable message or special event.
+ */
+function formatToolUse(toolName: string, input: any): ToolParseResult {
   switch (toolName) {
     case 'Bash':
       if (input?.command) {
         const cmd = input.command.length > 100
           ? input.command.substring(0, 97) + '...'
           : input.command;
-        return `Running: ${cmd}`;
+        return { type: 'tool_use', message: `Running: ${cmd}` };
       }
-      return 'Running command...';
+      return { type: 'tool_use', message: 'Running command...' };
 
     case 'Read':
       if (input?.file_path) {
-        return `Reading: ${input.file_path}`;
+        return { type: 'tool_use', message: `Reading: ${input.file_path}` };
       }
-      return 'Reading file...';
+      return { type: 'tool_use', message: 'Reading file...' };
 
     case 'Write':
       if (input?.file_path) {
-        return `Writing: ${input.file_path}`;
+        return { type: 'tool_use', message: `Writing: ${input.file_path}` };
       }
-      return 'Writing file...';
+      return { type: 'tool_use', message: 'Writing file...' };
 
     case 'Edit':
       if (input?.file_path) {
-        return `Editing: ${input.file_path}`;
+        return { type: 'tool_use', message: `Editing: ${input.file_path}` };
       }
-      return 'Editing file...';
+      return { type: 'tool_use', message: 'Editing file...' };
 
     case 'Glob':
       if (input?.pattern) {
-        return `Searching files: ${input.pattern}`;
+        return { type: 'tool_use', message: `Searching files: ${input.pattern}` };
       }
-      return 'Searching files...';
+      return { type: 'tool_use', message: 'Searching files...' };
 
     case 'Grep':
       if (input?.pattern) {
         const path = input.path ? ` in ${input.path}` : '';
-        return `Searching for: "${input.pattern}"${path}`;
+        return { type: 'tool_use', message: `Searching for: "${input.pattern}"${path}` };
       }
-      return 'Searching content...';
+      return { type: 'tool_use', message: 'Searching content...' };
 
     case 'WebFetch':
       if (input?.url) {
-        return `Fetching: ${input.url}`;
+        return { type: 'tool_use', message: `Fetching: ${input.url}` };
       }
-      return 'Fetching URL...';
+      return { type: 'tool_use', message: 'Fetching URL...' };
 
     case 'WebSearch':
       if (input?.query) {
-        return `Searching web: "${input.query}"`;
+        return { type: 'tool_use', message: `Searching web: "${input.query}"` };
       }
-      return 'Searching web...';
+      return { type: 'tool_use', message: 'Searching web...' };
 
     case 'Task':
       if (input?.description) {
-        return `Spawning agent: ${input.description}`;
+        return { type: 'tool_use', message: `Spawning agent: ${input.description}` };
       }
-      return 'Spawning agent...';
+      return { type: 'tool_use', message: 'Spawning agent...' };
+
+    // Plan mode tools
+    case 'EnterPlanMode':
+      return { type: 'plan_start', message: 'Entering plan mode...' };
+
+    case 'ExitPlanMode':
+      return { type: 'plan_exit', message: 'Exiting plan mode - ready to implement' };
+
+    // Task management tools
+    case 'TaskCreate':
+      return {
+        type: 'task_update',
+        message: `Creating task: ${input?.subject || 'New task'}`,
+        taskInfo: {
+          action: 'create',
+          subject: input?.subject,
+        },
+      };
+
+    case 'TaskUpdate':
+      const statusMsg = input?.status ? ` → ${input.status}` : '';
+      return {
+        type: 'task_update',
+        message: `Updating task${statusMsg}`,
+        taskInfo: {
+          action: 'update',
+          status: input?.status,
+        },
+      };
+
+    case 'TaskList':
+      return {
+        type: 'task_update',
+        message: 'Reviewing task list...',
+        taskInfo: { action: 'list' },
+      };
+
+    // User input tool
+    case 'AskUserQuestion':
+      const questions: UserInputQuestion[] = [];
+      if (input?.questions && Array.isArray(input.questions)) {
+        for (const q of input.questions) {
+          const options = (q.options || []).map((opt: any) => ({
+            label: opt.label || '',
+            description: opt.description,
+          }));
+          questions.push({
+            question: q.question || 'Question',
+            options,
+          });
+        }
+      }
+      return {
+        type: 'user_input_needed',
+        message: 'Waiting for your input...',
+        questions,
+      };
 
     default:
-      return `Using ${toolName}...`;
+      return { type: 'tool_use', message: `Using ${toolName}...` };
   }
 }
 
@@ -134,11 +206,13 @@ function parseStreamEvent(line: string): ProgressEvent | null {
       for (const block of event.message.content) {
         if (block.type === 'tool_use') {
           const toolName = block.name || 'unknown tool';
-          const message = formatToolUse(toolName, block.input);
+          const result = formatToolUse(toolName, block.input);
 
           return {
-            type: 'tool_use',
-            message,
+            type: result.type,
+            message: result.message,
+            questions: result.questions,
+            taskInfo: result.taskInfo,
           };
         } else if (block.type === 'thinking') {
           return {
@@ -150,6 +224,8 @@ function parseStreamEvent(line: string): ProgressEvent | null {
     } else if (event.type === 'content_block_start') {
       if (event.content_block?.type === 'tool_use') {
         const toolName = event.content_block.name || 'tool';
+        // For content_block_start, we just show the tool is starting
+        // The full details come in the assistant message
         return {
           type: 'tool_use',
           message: `Starting ${toolName}...`,
@@ -448,6 +524,25 @@ export class ClaudeClient implements AIClient {
     }
 
     this.sessions.delete(chatId);
+    return true;
+  }
+
+  /**
+   * Interrupts the current active process without terminating the session.
+   * Sends SIGINT (like Ctrl+C) to gracefully interrupt.
+   */
+  interruptProcess(chatId: number): boolean {
+    const session = this.sessions.get(chatId);
+    if (!session) {
+      return false;
+    }
+
+    if (!session.activeProcess) {
+      return false;
+    }
+
+    // Send SIGINT for graceful interrupt (like Ctrl+C)
+    session.activeProcess.kill('SIGINT');
     return true;
   }
 

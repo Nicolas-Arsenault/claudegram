@@ -28,11 +28,35 @@ export interface SessionState {
 }
 
 /**
+ * Option for user input questions.
+ */
+export interface UserInputOption {
+  label: string;
+  description?: string;
+}
+
+/**
+ * Question from AI needing user input.
+ */
+export interface UserInputQuestion {
+  question: string;
+  options: UserInputOption[];
+}
+
+/**
  * Progress event emitted during AI operations.
  */
 export interface ProgressEvent {
-  type: 'tool_use' | 'thinking' | 'working' | 'result';
+  type: 'tool_use' | 'thinking' | 'working' | 'result' | 'user_input_needed' | 'plan_start' | 'plan_exit' | 'task_update';
   message: string;
+  /** Present when type is 'user_input_needed' */
+  questions?: UserInputQuestion[];
+  /** Present when type is 'task_update' */
+  taskInfo?: {
+    action: 'create' | 'update' | 'list';
+    subject?: string;
+    status?: string;
+  };
 }
 
 /**
@@ -68,6 +92,12 @@ export interface AIClient {
    * Returns true if a session was terminated, false if no session existed.
    */
   killSession(chatId: number): boolean;
+
+  /**
+   * Interrupts the current active process without terminating the session.
+   * Returns true if a process was interrupted, false if no process was running.
+   */
+  interruptProcess(chatId: number): boolean;
 
   /**
    * Sends a message to the AI and returns the response.

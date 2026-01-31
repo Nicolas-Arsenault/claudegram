@@ -451,6 +451,25 @@ export class CodexClient implements AIClient {
   }
 
   /**
+   * Interrupts the current active process without terminating the session.
+   * Sends SIGINT (like Ctrl+C) to gracefully interrupt.
+   */
+  interruptProcess(chatId: number): boolean {
+    const session = this.sessions.get(chatId);
+    if (!session) {
+      return false;
+    }
+
+    if (!session.activeProcess) {
+      return false;
+    }
+
+    // Send SIGINT for graceful interrupt (like Ctrl+C)
+    session.activeProcess.kill('SIGINT');
+    return true;
+  }
+
+  /**
    * Cleans up a child process by removing all listeners and killing it.
    */
   private cleanupProcess(proc: ChildProcess): void {

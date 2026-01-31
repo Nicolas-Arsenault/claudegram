@@ -160,6 +160,7 @@ If installed from source, use `npm start` instead of `claudegram`.
 | `/status` | Check if a session is active |
 | `/screenshot` | List available displays |
 | `/screenshot <n>` | Capture display n |
+| `/interrupt` | Stop current operation (session remains active) |
 | `/kill` | Terminate current session |
 | `/cmd <command>` | Execute shell command directly (bypasses Claude) |
 
@@ -175,6 +176,16 @@ While Claude works, you'll see real-time updates:
 - `🔧 Searching for: "pattern"` — Content search
 - `💭 Thinking...` — Claude is reasoning
 - `⏳ Still working...` — Fallback every 30s if no other activity
+
+**Plan Mode Updates:**
+- `📋 Entering Plan Mode` — Claude is planning before executing
+- `✅ Plan Approved` — Claude is proceeding with implementation
+- `📝 Creating task: ...` — Task being added to plan
+- `✏️ Updating task → completed` — Task status change
+
+**User Input Requests:**
+- `❓ Claude needs your input:` — Claude is asking a question with options
+  - Reply with your choice or a custom response
 
 ### Direct Shell Execution
 
@@ -220,6 +231,7 @@ The default prompt is automatically loaded regardless of which directory you sta
 - **Persistent context** — AI retains full context within a session via session resume
 - **One session per chat** — Each Telegram chat has its own AI instance
 - **3-hour timeout** — Sessions end after 3 hours of inactivity (configurable)
+- **Interrupt support** — Use `/interrupt` to stop current operation while keeping session
 - **Manual termination** — Use `/kill` to end a session early
 - **Clean process management** — `/kill` terminates any running AI process
 

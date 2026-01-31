@@ -74,26 +74,95 @@ export class TelegramBot {
   /**
    * Sends a progress update to the user.
    * Throttled to avoid spamming - only sends if enough time has passed since last update.
+   * Special events (user input, plan mode) are always sent immediately.
    */
   private async sendProgressUpdate(chatId: number, event: ProgressEvent): Promise<void> {
     const now = Date.now();
     const lastUpdate = this.lastProgressUpdate.get(chatId) || 0;
 
-    // Throttle updates to avoid spam (except for "still working" which are already time-gated)
-    if (event.type !== 'working' && now - lastUpdate < PROGRESS_THROTTLE_MS) {
+    // These event types should always be sent immediately (not throttled)
+    const priorityEvents = ['user_input_needed', 'plan_start', 'plan_exit'];
+    const isPriority = priorityEvents.includes(event.type);
+
+    // Throttle updates to avoid spam (except for priority events and "still working" which are already time-gated)
+    if (!isPriority && event.type !== 'working' && now - lastUpdate < PROGRESS_THROTTLE_MS) {
       return;
     }
 
     this.lastProgressUpdate.set(chatId, now);
 
-    const icon = event.type === 'tool_use' ? '🔧' :
-                 event.type === 'thinking' ? '💭' :
-                 '⏳';
-
     try {
+      // Handle special event types with custom formatting
+      if (event.type === 'user_input_needed' && event.questions) {
+        await this.sendUserInputRequest(chatId, event.questions);
+        return;
+      }
+
+      if (event.type === 'plan_start') {
+        await this.bot.telegram.sendMessage(
+          chatId,
+          '📋 *Entering Plan Mode*\n\nClaude is planning the implementation. You\'ll see the plan before execution.',
+          { parse_mode: 'Markdown' }
+        );
+        return;
+      }
+
+      if (event.type === 'plan_exit') {
+        await this.bot.telegram.sendMessage(
+          chatId,
+          '✅ *Plan Approved*\n\nProceeding with implementation...',
+          { parse_mode: 'Markdown' }
+        );
+        return;
+      }
+
+      if (event.type === 'task_update' && event.taskInfo) {
+        const icon = event.taskInfo.action === 'create' ? '📝' :
+                     event.taskInfo.action === 'update' ? '✏️' : '📋';
+        await this.bot.telegram.sendMessage(chatId, `${icon} ${event.message}`);
+        return;
+      }
+
+      // Standard progress events
+      const icon = event.type === 'tool_use' ? '🔧' :
+                   event.type === 'thinking' ? '💭' :
+                   '⏳';
+
       await this.bot.telegram.sendMessage(chatId, `${icon} ${event.message}`);
     } catch (error) {
       console.error(`Failed to send progress update to ${chatId}:`, error);
+    }
+  }
+
+  /**
+   * Sends a formatted user input request to Telegram.
+   */
+  private async sendUserInputRequest(
+    chatId: number,
+    questions: { question: string; options: { label: string; description?: string }[] }[]
+  ): Promise<void> {
+    for (const q of questions) {
+      let message = `❓ *Claude needs your input:*\n\n${q.question}\n\n`;
+
+      if (q.options.length > 0) {
+        message += '*Options:*\n';
+        for (let i = 0; i < q.options.length; i++) {
+          const opt = q.options[i];
+          message += `${i + 1}. *${opt.label}*`;
+          if (opt.description) {
+            message += ` - ${opt.description}`;
+          }
+          message += '\n';
+        }
+        message += '\n_Reply with your choice or type a custom response._';
+      }
+
+      try {
+        await this.bot.telegram.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+      } catch {
+        // Fall back to plain text if Markdown fails
+        await this.bot.telegram.sendMessage(chatId, message.replace(/[*_]/g, ''));
+      }
     }
   }
 
@@ -186,6 +255,7 @@ export class TelegramBot {
         'Commands:\n' +
         '  /screenshot - List available displays\n' +
         '  /screenshot <n> - Capture display n\n' +
+        '  /interrupt - Stop current operation (keeps session)\n' +
         '  /kill - Terminate current session\n' +
         '  /status - Check session status\n' +
         '  /cmd <command> - Execute shell command directly\n\n' +
@@ -208,6 +278,22 @@ export class TelegramBot {
         );
       } else {
         await ctx.reply('No active session to terminate.');
+      }
+    });
+
+    // Handle /interrupt command
+    this.bot.command('interrupt', async (ctx) => {
+      const chatId = ctx.chat.id;
+      if (this.aiClient.interruptProcess(chatId)) {
+        await ctx.reply(
+          '⚡ Interrupt signal sent.\n\n' +
+          'The current operation will be stopped. Session remains active.'
+        );
+      } else {
+        await ctx.reply(
+          'Nothing to interrupt.\n\n' +
+          'No operation is currently running.'
+        );
       }
     });
 

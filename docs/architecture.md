@@ -65,8 +65,9 @@ Telegram bot handler. Responsibilities:
 
 ### src/sdk/types.ts
 Shared types and interfaces. Responsibilities:
-- Define AIClient interface
+- Define AIClient interface (including interruptProcess method)
 - Define AIResponse, SessionState, ProgressEvent types
+- Define UserInputQuestion, UserInputOption types for user prompts
 - Define callback types for session events
 
 ### src/sdk/client.ts (ClaudeClient)
@@ -133,11 +134,26 @@ Telegram image
 ## Session Lifecycle
 
 1. **Creation**: Session created explicitly via `/start` command (not auto-created)
-2. **Active**: Messages forwarded to PTY, output sent back, context retained
-3. **Idle Timeout**: Session killed after 3 hours inactivity (configurable)
-4. **Manual Kill**: User sends `/kill` command
-5. **Process Exit**: Claude Code exits naturally
-6. **New Session**: User must `/start` again; no previous context is retained
+2. **Active**: Messages forwarded to AI CLI, output sent back, context retained
+3. **Interrupt**: User sends `/interrupt` to stop current operation (session remains active)
+4. **Idle Timeout**: Session killed after 3 hours inactivity (configurable)
+5. **Manual Kill**: User sends `/kill` command
+6. **Process Exit**: AI CLI exits naturally
+7. **New Session**: User must `/start` again; no previous context is retained
+
+## Progress Events
+
+The system emits various progress events during AI operations:
+
+| Event Type | Description | Formatting |
+|------------|-------------|------------|
+| `tool_use` | AI is using a tool (Read, Write, Bash, etc.) | 🔧 Running/Reading/Writing... |
+| `thinking` | AI is reasoning | 💭 Thinking... |
+| `working` | Fallback when no activity for 45s | ⏳ Still working... |
+| `plan_start` | AI entering plan mode | 📋 Entering Plan Mode |
+| `plan_exit` | AI exiting plan mode | ✅ Plan Approved |
+| `task_update` | Task created/updated/listed | 📝/✏️/📋 Task info |
+| `user_input_needed` | AI needs user input | ❓ Question with options |
 
 ## Error Handling
 
