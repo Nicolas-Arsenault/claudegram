@@ -19,6 +19,18 @@
 import { loadConfig } from './config';
 import { TelegramBot } from './telegram/bot';
 
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise);
+  console.error('Reason:', reason);
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+  process.exit(1);
+});
+
 async function main(): Promise<void> {
   console.log('Claudegram');
   console.log('==========\n');

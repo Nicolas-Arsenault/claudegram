@@ -9,12 +9,13 @@
  *
  * Optional environment variables:
  * - AI_BACKEND: AI backend to use - 'claude' or 'codex' (default: 'claude')
- * - SCREENSHOT_OUTPUT_DIR: Directory for screenshots (default: ./screenshots)
- * - INPUT_IMAGE_DIR: Directory for received images (default: ./inputs)
+ * - SCREENSHOT_OUTPUT_DIR: Directory for screenshots (default: ~/.claudegram/screenshots)
+ * - INPUT_IMAGE_DIR: Directory for received images (default: ~/.claudegram/inputs)
  * - SESSION_IDLE_TIMEOUT_MS: Idle timeout in ms (default: 3 hours)
  */
 
 import * as path from 'path';
+import * as os from 'os';
 
 /**
  * Supported AI backends.
@@ -72,12 +73,15 @@ export function loadConfig(): Config {
   // Use __dirname to resolve relative to the package, not cwd
   const packageRoot = path.resolve(__dirname, '..');
 
+  // Default to ~/.claudegram for user-writable storage
+  const claudegramHome = path.join(os.homedir(), '.claudegram');
+
   const screenshotOutputDir = process.env.SCREENSHOT_OUTPUT_DIR
     ? path.resolve(process.env.SCREENSHOT_OUTPUT_DIR)
-    : path.join(packageRoot, 'screenshots');
+    : path.join(claudegramHome, 'screenshots');
   const inputImageDir = process.env.INPUT_IMAGE_DIR
     ? path.resolve(process.env.INPUT_IMAGE_DIR)
-    : path.join(packageRoot, 'inputs');
+    : path.join(claudegramHome, 'inputs');
 
   // Default idle timeout: 3 hours
   const sessionIdleTimeoutMs = parseInt(

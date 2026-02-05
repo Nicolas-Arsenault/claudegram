@@ -235,6 +235,16 @@ The default prompt is automatically loaded regardless of which directory you sta
 - **Manual termination** — Use `/kill` to end a session early
 - **Clean process management** — `/kill` terminates any running AI process
 
+## Connection Resilience
+
+The bot includes automatic recovery mechanisms for long-running deployments:
+
+- **Error handling** — Telegraf errors are caught and logged without crashing
+- **Automatic reconnection** — Network failures trigger reconnection with exponential backoff (up to 10 attempts)
+- **Health monitoring** — Periodic API checks every 2 minutes; reconnects if no updates for 5 minutes
+- **Memory management** — Stale progress tracking entries are cleaned up automatically
+- **Global error handlers** — Unhandled rejections and exceptions are logged
+
 ## Project Structure
 
 ```

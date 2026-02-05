@@ -47,12 +47,42 @@ export class TelegramBot {
   private inputImageDir: string;
   private lastProgressUpdate: Map<number, number> = new Map();
 
+  // Connection resilience properties
+  private isRunning: boolean = false;
+  private reconnectAttempts: number = 0;
+  private maxReconnectAttempts: number = 10;
+  private baseReconnectDelayMs: number = 1000;
+  private maxReconnectDelayMs: number = 60000;
+  private healthCheckInterval: NodeJS.Timeout | null = null;
+  private lastUpdateReceived: number = Date.now();
+  private progressCleanupInterval: NodeJS.Timeout | null = null;
+
   constructor(config: Config) {
     this.bot = new Telegraf(config.telegramBotToken);
     this.aiClient = createAIClient(config);
     this.screenshotCapture = new ScreenshotCapture(config.screenshotOutputDir);
     this.accessControl = new AccessControl(config.allowedUserIds);
     this.inputImageDir = config.inputImageDir;
+
+    // Set up global error handler for Telegraf
+    this.bot.catch((err, ctx) => {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      console.error(`Telegraf error for update ${ctx?.update?.update_id}:`, errorMessage);
+
+      // Check if this is a connection-related error
+      const isConnectionError =
+        errorMessage.includes('ECONNRESET') ||
+        errorMessage.includes('ETIMEDOUT') ||
+        errorMessage.includes('ENOTFOUND') ||
+        errorMessage.includes('socket hang up') ||
+        errorMessage.includes('fetch failed');
+
+      if (isConnectionError && this.isRunning) {
+        console.log('Connection error detected, initiating reconnection...');
+        try { this.bot.stop('connection_error'); } catch { /* Already stopped */ }
+        this.reconnect();
+      }
+    });
 
     this.setupSessionCallbacks();
     this.setupHandlers();
@@ -64,6 +94,7 @@ export class TelegramBot {
   private setupSessionCallbacks(): void {
     this.aiClient.setSessionEndCallback((chatId, reason) => {
       this.sendMessage(chatId, `Session ended: ${reason}`);
+      this.lastProgressUpdate.delete(chatId); // Clean up progress tracking
     });
 
     this.aiClient.setProgressCallback((chatId, event) => {
@@ -226,8 +257,11 @@ export class TelegramBot {
    * Sets up Telegram bot command and message handlers.
    */
   private setupHandlers(): void {
-    // Access control middleware
+    // Access control middleware with update tracking for health check
     this.bot.use(async (ctx, next) => {
+      // Track that we received an update (for health check)
+      this.lastUpdateReceived = Date.now();
+
       const userId = ctx.from?.id;
       if (!userId || !this.accessControl.isAuthorized(userId)) {
         console.log(`Unauthorized access attempt from user ${userId}`);
@@ -560,21 +594,148 @@ export class TelegramBot {
   }
 
   /**
-   * Starts the Telegram bot.
+   * Attempts to reconnect to Telegram with exponential backoff.
+   * Gives up after maxReconnectAttempts.
    */
-  async start(): Promise<void> {
-    console.log('Starting Telegram bot...');
-    await this.bot.launch();
-    console.log('Telegram bot started.');
+  private async reconnect(): Promise<void> {
+    if (!this.isRunning) return;
+
+    this.reconnectAttempts++;
+    if (this.reconnectAttempts > this.maxReconnectAttempts) {
+      console.error(`Max reconnection attempts (${this.maxReconnectAttempts}) exceeded. Giving up.`);
+      return;
+    }
+
+    const delay = Math.min(
+      this.baseReconnectDelayMs * Math.pow(2, this.reconnectAttempts - 1),
+      this.maxReconnectDelayMs
+    );
+
+    console.log(`Reconnection attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms...`);
+    await new Promise(resolve => setTimeout(resolve, delay));
+
+    if (!this.isRunning) return;
+
+    try {
+      await this.bot.launch();
+      console.log('Reconnection successful.');
+      this.reconnectAttempts = 0;
+      this.lastUpdateReceived = Date.now();
+    } catch (error) {
+      console.error(`Reconnection failed:`, error instanceof Error ? error.message : error);
+      this.reconnect();
+    }
   }
 
   /**
-   * Stops the Telegram bot and cleans up sessions.
+   * Starts periodic health check to detect dead connections.
+   * If no updates received for 5 minutes, verifies API connectivity.
+   */
+  private startHealthCheck(): void {
+    this.healthCheckInterval = setInterval(async () => {
+      const timeSinceLastUpdate = Date.now() - this.lastUpdateReceived;
+
+      // If no updates for 5 minutes, check API connectivity
+      if (timeSinceLastUpdate > 300000) {
+        console.warn(`No updates for ${Math.floor(timeSinceLastUpdate / 1000)}s - checking connectivity...`);
+
+        try {
+          await this.bot.telegram.getMe();
+          console.log('API connectivity OK.');
+          this.lastUpdateReceived = Date.now();
+        } catch (error) {
+          console.error(`API check failed:`, error instanceof Error ? error.message : error);
+          if (this.isRunning) {
+            try { this.bot.stop('health_check_failed'); } catch { /* Already stopped */ }
+            this.reconnect();
+          }
+        }
+      }
+    }, 120000); // Check every 2 minutes
+  }
+
+  /**
+   * Stops the health check interval.
+   */
+  private stopHealthCheck(): void {
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+      this.healthCheckInterval = null;
+    }
+  }
+
+  /**
+   * Starts periodic cleanup of stale progress tracking entries.
+   * Removes entries older than 1 hour to prevent memory leaks.
+   */
+  private startProgressCleanup(): void {
+    this.progressCleanupInterval = setInterval(() => {
+      const now = Date.now();
+      let cleaned = 0;
+      for (const [chatId, timestamp] of this.lastProgressUpdate) {
+        if (now - timestamp > 3600000) { // 1 hour
+          this.lastProgressUpdate.delete(chatId);
+          cleaned++;
+        }
+      }
+      if (cleaned > 0) {
+        console.log(`Cleaned ${cleaned} stale progress tracking entries.`);
+      }
+    }, 1800000); // Every 30 minutes
+  }
+
+  /**
+   * Stops the progress cleanup interval.
+   */
+  private stopProgressCleanup(): void {
+    if (this.progressCleanupInterval) {
+      clearInterval(this.progressCleanupInterval);
+      this.progressCleanupInterval = null;
+    }
+  }
+
+  /**
+   * Starts the Telegram bot with connection resilience.
+   */
+  async start(): Promise<void> {
+    console.log('Starting Telegram bot...');
+
+    this.isRunning = true;
+    this.reconnectAttempts = 0;
+    this.lastUpdateReceived = Date.now();
+
+    this.startHealthCheck();
+    this.startProgressCleanup();
+
+    try {
+      await this.bot.launch();
+      console.log('Telegram bot started successfully.');
+    } catch (error) {
+      console.error(`Failed to start bot:`, error instanceof Error ? error.message : error);
+      if (this.isRunning) {
+        this.reconnect();
+      }
+    }
+  }
+
+  /**
+   * Stops the Telegram bot and cleans up all resources.
    */
   async stop(): Promise<void> {
     console.log('Stopping Telegram bot...');
+
+    this.isRunning = false;
+    this.stopHealthCheck();
+    this.stopProgressCleanup();
+    this.lastProgressUpdate.clear();
     this.aiClient.shutdown();
-    this.bot.stop('SIGTERM');
+
+    try {
+      this.bot.stop('SIGTERM');
+    } catch {
+      // Bot might already be stopped
+    }
+
     console.log('Telegram bot stopped.');
   }
 }
